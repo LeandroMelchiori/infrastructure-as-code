@@ -47,3 +47,28 @@ output "media_bucket_access_type" {
   description = "Tipo de acceso configurado para el bucket"
   value       = oci_objectstorage_bucket.media.access_type
 }
+
+output "monitoring_enabled" {
+  description = "Indica si la observabilidad opcional está habilitada"
+  value       = var.monitoring_enabled
+}
+
+output "notification_topic_id" {
+  description = "OCID del topic de OCI Notifications, o null si el monitoreo está deshabilitado"
+  value       = try(oci_ons_notification_topic.alerts[0].id, null)
+}
+
+output "notification_subscription_id" {
+  description = "OCID de la suscripción de alertas, o null si el monitoreo está deshabilitado"
+  value       = try(oci_ons_subscription.alerts[0].id, null)
+}
+
+output "notification_subscription_state" {
+  description = "Estado de la suscripción de alertas, o null si el monitoreo está deshabilitado"
+  value       = try(oci_ons_subscription.alerts[0].state, null)
+}
+
+output "cpu_alarm_id" {
+  description = "OCID de la alarma de CPU, o null si el monitoreo está deshabilitado"
+  value       = try(oci_monitoring_alarm.high_cpu[0].id, null)
+}

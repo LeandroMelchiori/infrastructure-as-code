@@ -48,3 +48,18 @@ object_storage_access_type = "NoPublicAccess"
 
 # El versionado puede aumentar el consumo de almacenamiento.
 object_storage_versioning = false
+
+# Observabilidad
+# Al habilitarla, notification_endpoint es obligatorio.
+monitoring_enabled = false
+
+# El nombre debe ser único en la tenancy. null utiliza: <project_name>-alerts
+notification_topic_name = null
+
+# Protocolos: EMAIL, CUSTOM_HTTPS, ORACLE_FUNCTIONS, PAGERDUTY, SLACK o SMS
+notification_protocol = "EMAIL"
+notification_endpoint = null
+
+cpu_alarm_threshold_percent        = 80
+cpu_alarm_pending_duration_minutes = 5
+cpu_alarm_severity                 = "WARNING"

@@ -28,6 +28,8 @@ y obtener una plataforma OCI configurada con:
 - Docker
 - Docker Compose
 - OCI CLI
+- OCI Monitoring
+- OCI Notifications
 - firewalld
 - Traefik
 - Let's Encrypt
@@ -89,6 +91,17 @@ La aplicación que luego se despliegue sobre esta plataforma no forma parte de e
                       │
                       ▼
                    KMS Key
+
+
+                OCI Monitoring
+                      │
+                Alarma de CPU
+                      │
+                      ▼
+             OCI Notifications
+                      │
+                      ▼
+                 Suscripción
 ```
 
 ---
@@ -165,6 +178,89 @@ boot_volume_size_in_gbs = 50
 ```
 
 La clave pública SSH configurada en Terraform se agrega automáticamente a la instancia.
+
+---
+
+## Observabilidad y alertas
+
+La observabilidad es opcional y utiliza servicios nativos de OCI sin depender de
+ninguna aplicación desplegada en Docker.
+
+Cuando `monitoring_enabled = true`, Terraform crea:
+
+- un topic de OCI Notifications;
+- una suscripción configurable;
+- una alarma de CPU para la instancia Compute.
+
+La alarma consulta `CpuUtilization` en el namespace agentless
+`oci_vmi_resource_utilization` y filtra por el OCID de la instancia. Esta métrica
+se obtiene desde el hipervisor, por lo que no requiere modificar la VM ni instalar
+software adicional. La ventana de evaluación es de cinco minutos.
+
+```text
+OCI Compute
+     │
+     ▼
+CpuUtilization
+     │
+     ▼
+Alarma de CPU
+     │
+     ▼
+Topic de Notifications
+     │
+     ▼
+Email, Custom HTTPS, Slack, PagerDuty, SMS o Function
+```
+
+Configuración de ejemplo:
+
+```hcl
+monitoring_enabled = true
+
+notification_protocol = "EMAIL"
+notification_endpoint = "equipo-operaciones@example.com"
+
+cpu_alarm_threshold_percent        = 80
+cpu_alarm_pending_duration_minutes = 5
+cpu_alarm_severity                 = "WARNING"
+```
+
+El endpoint se define únicamente en `terraform.tfvars`, que está ignorado por
+Git, y la variable está marcada como sensible para ocultarla en la salida de
+Terraform. El valor seguirá formando parte del state remoto, por lo que el bucket
+de state debe permanecer privado. Para evitar cambios sobre instalaciones
+existentes, el monitoreo está deshabilitado por defecto.
+
+El nombre predeterminado del topic es `<project_name>-alerts`. Como los nombres
+de topics deben ser únicos dentro de la tenancy, puede sobrescribirse:
+
+```hcl
+notification_topic_name = "mi-proyecto-produccion-alerts"
+```
+
+Las suscripciones que lo requieran deben confirmarse desde el endpoint. Una
+suscripción en estado `PENDING` todavía no recibe alertas.
+
+La identidad que ejecuta Terraform debe poder administrar alarmas y topics, y
+leer métricas en el compartment. Un ejemplo de permisos para un grupo es:
+
+```text
+Allow group <grupo-terraform> to manage alarms in compartment <compartment>
+Allow group <grupo-terraform> to read metrics in compartment <compartment>
+Allow group <grupo-terraform> to manage ons-topics in compartment <compartment>
+```
+
+Deshabilitar `monitoring_enabled` después de haberlo activado elimina la alarma,
+la suscripción y el topic en el siguiente `apply`; no afecta Compute, red,
+storage, Vault ni recursos de aplicación.
+
+### Costos
+
+OCI Monitoring y Notifications tienen niveles gratuitos amplios, pero pueden
+generar cargos al superar los límites de ingestión, consulta o entrega. Revisa el
+consumo y los precios vigentes de la tenancy, especialmente para notificaciones
+frecuentes, SMS o integraciones externas.
 
 ---
 
@@ -421,6 +517,7 @@ docker-platform/
 ├── iam.tf
 ├── locals.tf
 ├── network.tf
+├── observability.tf
 ├── outputs.tf
 ├── providers.tf
 ├── security.tf
@@ -465,6 +562,13 @@ traefik_image
 media_bucket_name
 object_storage_access_type
 object_storage_versioning
+monitoring_enabled
+notification_topic_name
+notification_protocol
+notification_endpoint
+cpu_alarm_threshold_percent
+cpu_alarm_pending_duration_minutes
+cpu_alarm_severity
 ```
 
 ---
@@ -501,6 +605,8 @@ ssh_public_key_path = "~/.ssh/id_rsa.pub"
 ssh_source_cidr = "0.0.0.0/0"
 
 acme_email = "correo@example.com"
+
+monitoring_enabled = false
 ```
 
 El archivo:
@@ -634,6 +740,11 @@ vcn_id
 subnet_id
 vault_id
 key_id
+monitoring_enabled
+notification_topic_id
+notification_subscription_id
+notification_subscription_state
+cpu_alarm_id
 ```
 
 ---
@@ -721,6 +832,7 @@ El repositorio excluye:
 
 ```text
 terraform.tfvars
+*.tfbackend
 *.tfstate
 *.tfstate.*
 *.tfplan
@@ -794,13 +906,18 @@ terraform validate
 terraform plan
 ```
 
-El plan generado para una infraestructura completamente nueva fue:
+Con `monitoring_enabled = false`, la cantidad base histórica para una
+infraestructura completamente nueva fue:
 
 ```text
 Plan: 16 to add, 0 to change, 0 to destroy.
 ```
 
 Esto permitió comprobar que la plantilla representa una infraestructura independiente y no intenta modificar otros entornos existentes.
+
+Al habilitar la observabilidad se agregan tres recursos opcionales: topic,
+suscripción y alarma. Antes de aplicar, verifica que el plan no reemplace ni
+destruya recursos existentes.
 
 ---
 
