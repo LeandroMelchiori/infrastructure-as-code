@@ -181,6 +181,128 @@ La clave pública SSH configurada en Terraform se agrega automáticamente a la i
 
 ---
 
+## Backups y recuperación
+
+La capa de backup es opcional, genérica y no depende de las aplicaciones
+desplegadas en Docker. Permanece deshabilitada por defecto:
+
+```hcl
+backup_enabled = false
+```
+
+Cuando se habilita, Terraform crea una política personalizada de OCI Block
+Volume y la asigna al boot volume de la instancia. Los backups son generados y
+expirados por OCI según la programación; Terraform no crea ni conserva recursos
+`oci_core_boot_volume_backup` individuales.
+
+Ejemplo conservador semanal:
+
+```hcl
+backup_enabled        = true
+backup_frequency      = "WEEKLY"
+backup_type           = "INCREMENTAL"
+backup_retention_days = 28
+backup_hour_utc       = 2
+backup_day_of_week    = "SUNDAY"
+```
+
+También se admiten frecuencias `DAILY` y `MONTHLY`:
+
+```hcl
+backup_frequency = "DAILY"
+
+# Para MONTHLY:
+# backup_day_of_month = 1
+```
+
+La hora y los días se interpretan en UTC. La retención controla cuánto tiempo
+OCI conserva cada backup creado por la política. Los tipos permitidos son
+`INCREMENTAL` y `FULL`.
+
+Un boot volume solo puede tener una política de backup asignada. Si ya existe
+una asignación administrada fuera de este Terraform, revisa el plan antes de
+aplicar porque OCI puede reemplazarla por la política declarada aquí.
+
+Deshabilitar `backup_enabled` elimina la asignación y la política administradas
+por Terraform, pero no destruye la instancia ni el boot volume. Los backups ya
+creados pueden permanecer hasta que expire su retención según el comportamiento
+del servicio.
+
+### Recuperación
+
+La restauración es una acción operativa deliberada y no reemplaza
+automáticamente la instancia existente. Ante una recuperación:
+
+1. identifica un backup válido del boot volume;
+2. crea un nuevo boot volume desde ese backup;
+3. valida el volumen restaurado antes de cambiar o recrear la instancia;
+4. revisa siempre el plan para evitar reemplazos accidentales.
+
+Por ejemplo, los backups disponibles pueden consultarse con OCI CLI:
+
+```bash
+oci bv boot-volume-backup list \
+  --compartment-id "<compartment_ocid>" \
+  --volume-id "<boot_volume_id>"
+```
+
+La automatización de una restauración no forma parte de esta plantilla porque
+implica decidir explícitamente qué instancia o volumen debe reemplazarse.
+
+### Protección de Object Storage
+
+El bucket `media` conserva el versionado opcional existente y agrega una
+política lifecycle también opcional. Todas las acciones permanecen
+deshabilitadas por defecto:
+
+```hcl
+object_storage_versioning         = false
+object_storage_lifecycle_enabled  = false
+
+object_storage_archive_after_days                    = null
+object_storage_delete_previous_versions_after_days   = null
+object_storage_abort_multipart_uploads_after_days     = null
+```
+
+Las reglas disponibles son:
+
+- archivar objetos actuales después de una cantidad de días;
+- eliminar versiones anteriores, solo con versionado habilitado;
+- abortar cargas multipart incompletas.
+
+Para habilitar lifecycle debe configurarse al menos una regla. El siguiente
+ejemplo protege versiones y limpia únicamente uploads incompletos:
+
+```hcl
+object_storage_versioning        = true
+object_storage_lifecycle_enabled = true
+
+object_storage_abort_multipart_uploads_after_days = 7
+```
+
+La eliminación de versiones anteriores es irreversible y debe habilitarse de
+forma explícita. Archivar objetos puede afectar a aplicaciones que esperan
+acceso inmediato y puede generar costos de recuperación. Esta arquitectura no
+crea Object Retention Rules ni activa bloqueos irreversibles.
+
+### Permisos y costos
+
+No se amplía la IAM del Instance Principal. La identidad que ejecuta Terraform
+debe poder administrar políticas de backup, sus asignaciones y lifecycle de
+Object Storage en el compartment.
+
+Los backups de boot volumes consumen almacenamiento y pueden generar cargos al
+superar las cuotas gratuitas. La frecuencia, el tipo y la retención determinan
+cuántas copias se conservan. OCI incluye cinco backups de volumen Always Free en
+la home region, compartidos entre boot y block volumes. El ejemplo semanal con
+28 días apunta a conservar cuatro, pero los backups de otros volúmenes también
+cuentan. Consulta los
+[límites Always Free de OCI](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
+El versionado y el archivado también aumentan el almacenamiento facturable;
+recuperar objetos archivados puede tener costo.
+
+---
+
 ## Observabilidad y alertas
 
 La observabilidad es opcional y utiliza servicios nativos de OCI sin depender de
@@ -512,6 +634,7 @@ Aplicaciones
 docker-platform/
 │
 ├── README.md
+├── backup.tf
 ├── backend.oci.tfbackend.example
 ├── compute.tf
 ├── iam.tf
@@ -562,6 +685,17 @@ traefik_image
 media_bucket_name
 object_storage_access_type
 object_storage_versioning
+object_storage_lifecycle_enabled
+object_storage_archive_after_days
+object_storage_delete_previous_versions_after_days
+object_storage_abort_multipart_uploads_after_days
+backup_enabled
+backup_frequency
+backup_type
+backup_retention_days
+backup_hour_utc
+backup_day_of_week
+backup_day_of_month
 monitoring_enabled
 notification_topic_name
 notification_protocol
@@ -605,6 +739,8 @@ ssh_public_key_path = "~/.ssh/id_rsa.pub"
 ssh_source_cidr = "0.0.0.0/0"
 
 acme_email = "correo@example.com"
+
+backup_enabled = false
 
 monitoring_enabled = false
 ```
@@ -740,6 +876,14 @@ vcn_id
 subnet_id
 vault_id
 key_id
+media_bucket_name
+media_bucket_access_type
+media_bucket_versioning
+object_storage_lifecycle_policy_id
+backup_enabled
+boot_volume_id
+boot_volume_backup_policy_id
+boot_volume_backup_policy_assignment_id
 monitoring_enabled
 notification_topic_id
 notification_subscription_id
@@ -916,8 +1060,9 @@ Plan: 16 to add, 0 to change, 0 to destroy.
 Esto permitió comprobar que la plantilla representa una infraestructura independiente y no intenta modificar otros entornos existentes.
 
 Al habilitar la observabilidad se agregan tres recursos opcionales: topic,
-suscripción y alarma. Antes de aplicar, verifica que el plan no reemplace ni
-destruya recursos existentes.
+suscripción y alarma. Al habilitar backups se agregan una política y su
+asignación; lifecycle agrega una política sobre el bucket existente. Antes de
+aplicar, verifica que el plan no reemplace ni destruya recursos existentes.
 
 ---
 

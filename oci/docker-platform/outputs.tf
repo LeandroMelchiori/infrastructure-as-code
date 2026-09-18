@@ -48,6 +48,36 @@ output "media_bucket_access_type" {
   value       = oci_objectstorage_bucket.media.access_type
 }
 
+output "media_bucket_versioning" {
+  description = "Estado del versionado del bucket media"
+  value       = oci_objectstorage_bucket.media.versioning
+}
+
+output "object_storage_lifecycle_policy_id" {
+  description = "ID de la política lifecycle del bucket media, o null si está deshabilitada"
+  value       = try(oci_objectstorage_object_lifecycle_policy.media[0].id, null)
+}
+
+output "backup_enabled" {
+  description = "Indica si la política de backup del boot volume está habilitada"
+  value       = var.backup_enabled
+}
+
+output "boot_volume_id" {
+  description = "OCID del boot volume asociado a la instancia"
+  value       = oci_core_instance.server.boot_volume_id
+}
+
+output "boot_volume_backup_policy_id" {
+  description = "OCID de la política de backup del boot volume, o null si está deshabilitada"
+  value       = try(oci_core_volume_backup_policy.boot[0].id, null)
+}
+
+output "boot_volume_backup_policy_assignment_id" {
+  description = "OCID de la asignación de backup del boot volume, o null si está deshabilitada"
+  value       = try(oci_core_volume_backup_policy_assignment.boot[0].id, null)
+}
+
 output "monitoring_enabled" {
   description = "Indica si la observabilidad opcional está habilitada"
   value       = var.monitoring_enabled

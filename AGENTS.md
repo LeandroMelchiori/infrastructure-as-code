@@ -115,6 +115,7 @@ La carpeta `oci/docker-platform` define:
 - `iam.tf`: Dynamic Group e IAM Policy para leer secretos y acceder al bucket.
 - `vault.tf`: OCI Vault y KMS Key.
 - `storage.tf`: bucket de Object Storage para archivos de aplicaciones.
+- `backup.tf`: política y asignación opcionales de backup del boot volume y lifecycle del bucket media.
 - `observability.tf`: topic, suscripción y alarma opcionales para monitoreo de CPU.
 - `backend.oci.tfbackend.example`: ejemplo sin credenciales para configurar el backend remoto dedicado.
 - `locals.tf`: nombres derivados y tags comunes.
@@ -157,6 +158,17 @@ Variables requeridas o de alto impacto:
 - `media_bucket_name`
 - `object_storage_access_type`
 - `object_storage_versioning`
+- `object_storage_lifecycle_enabled`
+- `object_storage_archive_after_days`
+- `object_storage_delete_previous_versions_after_days`
+- `object_storage_abort_multipart_uploads_after_days`
+- `backup_enabled`
+- `backup_frequency`
+- `backup_type`
+- `backup_retention_days`
+- `backup_hour_utc`
+- `backup_day_of_week`
+- `backup_day_of_month`
 - `monitoring_enabled`
 - `notification_topic_name`
 - `notification_protocol`

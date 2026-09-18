@@ -129,6 +129,160 @@ variable "object_storage_versioning" {
   default     = false
 }
 
+variable "object_storage_lifecycle_enabled" {
+  description = "Crea una política lifecycle opcional para el bucket media"
+  type        = bool
+  default     = false
+
+  validation {
+    condition = (
+      !var.object_storage_lifecycle_enabled ||
+      var.object_storage_archive_after_days != null ||
+      var.object_storage_delete_previous_versions_after_days != null ||
+      var.object_storage_abort_multipart_uploads_after_days != null
+    )
+    error_message = "Al habilitar object_storage_lifecycle_enabled debe configurarse al menos una regla lifecycle."
+  }
+
+  validation {
+    condition = (
+      !var.object_storage_lifecycle_enabled ||
+      var.object_storage_delete_previous_versions_after_days == null ||
+      var.object_storage_versioning
+    )
+    error_message = "object_storage_versioning debe ser true para eliminar versiones anteriores."
+  }
+}
+
+variable "object_storage_archive_after_days" {
+  description = "Días antes de archivar objetos actuales; null desactiva la regla"
+  type        = number
+  default     = null
+
+  validation {
+    condition = var.object_storage_archive_after_days == null ? true : (
+      (var.object_storage_archive_after_days >= 1 && floor(var.object_storage_archive_after_days) == var.object_storage_archive_after_days)
+    )
+    error_message = "object_storage_archive_after_days debe ser null o un entero mayor o igual que 1."
+  }
+}
+
+variable "object_storage_delete_previous_versions_after_days" {
+  description = "Días antes de eliminar versiones anteriores; null desactiva la regla destructiva"
+  type        = number
+  default     = null
+
+  validation {
+    condition = var.object_storage_delete_previous_versions_after_days == null ? true : (
+      (
+        var.object_storage_delete_previous_versions_after_days >= 1 &&
+        floor(var.object_storage_delete_previous_versions_after_days) == var.object_storage_delete_previous_versions_after_days
+      )
+    )
+    error_message = "object_storage_delete_previous_versions_after_days debe ser null o un entero mayor o igual que 1."
+  }
+}
+
+variable "object_storage_abort_multipart_uploads_after_days" {
+  description = "Días antes de abortar multipart uploads incompletos; null desactiva la limpieza"
+  type        = number
+  default     = null
+
+  validation {
+    condition = var.object_storage_abort_multipart_uploads_after_days == null ? true : (
+      (
+        var.object_storage_abort_multipart_uploads_after_days >= 1 &&
+        floor(var.object_storage_abort_multipart_uploads_after_days) == var.object_storage_abort_multipart_uploads_after_days
+      )
+    )
+    error_message = "object_storage_abort_multipart_uploads_after_days debe ser null o un entero mayor o igual que 1."
+  }
+}
+
+variable "backup_enabled" {
+  description = "Crea y asigna una política de backup al boot volume de la instancia"
+  type        = bool
+  default     = false
+}
+
+variable "backup_frequency" {
+  description = "Frecuencia del backup del boot volume"
+  type        = string
+  default     = "WEEKLY"
+
+  validation {
+    condition     = contains(["DAILY", "WEEKLY", "MONTHLY"], var.backup_frequency)
+    error_message = "backup_frequency debe ser DAILY, WEEKLY o MONTHLY."
+  }
+}
+
+variable "backup_type" {
+  description = "Tipo de backup del boot volume"
+  type        = string
+  default     = "INCREMENTAL"
+
+  validation {
+    condition     = contains(["FULL", "INCREMENTAL"], var.backup_type)
+    error_message = "backup_type debe ser FULL o INCREMENTAL."
+  }
+}
+
+variable "backup_retention_days" {
+  description = "Cantidad de días que OCI conserva cada backup creado por la política"
+  type        = number
+  default     = 28
+
+  validation {
+    condition = (
+      var.backup_retention_days >= 1 &&
+      var.backup_retention_days <= 3650 &&
+      floor(var.backup_retention_days) == var.backup_retention_days
+    )
+    error_message = "backup_retention_days debe ser un entero entre 1 y 3650."
+  }
+}
+
+variable "backup_hour_utc" {
+  description = "Hora UTC de inicio del backup, entre 0 y 23"
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.backup_hour_utc >= 0 && var.backup_hour_utc <= 23 && floor(var.backup_hour_utc) == var.backup_hour_utc
+    error_message = "backup_hour_utc debe ser un entero entre 0 y 23."
+  }
+}
+
+variable "backup_day_of_week" {
+  description = "Día UTC utilizado cuando backup_frequency es WEEKLY"
+  type        = string
+  default     = "SUNDAY"
+
+  validation {
+    condition = contains([
+      "MONDAY",
+      "TUESDAY",
+      "WEDNESDAY",
+      "THURSDAY",
+      "FRIDAY",
+      "SATURDAY",
+      "SUNDAY"
+    ], var.backup_day_of_week)
+    error_message = "backup_day_of_week debe ser un día de la semana en inglés y mayúsculas."
+  }
+}
+
+variable "backup_day_of_month" {
+  description = "Día UTC del mes utilizado cuando backup_frequency es MONTHLY"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.backup_day_of_month >= 1 && var.backup_day_of_month <= 28 && floor(var.backup_day_of_month) == var.backup_day_of_month
+    error_message = "backup_day_of_month debe ser un entero entre 1 y 28."
+  }
+}
+
 variable "monitoring_enabled" {
   description = "Crea la alarma de CPU y los recursos de OCI Notifications"
   type        = bool

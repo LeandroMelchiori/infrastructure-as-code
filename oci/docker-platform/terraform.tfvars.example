@@ -49,6 +49,31 @@ object_storage_access_type = "NoPublicAccess"
 # El versionado puede aumentar el consumo de almacenamiento.
 object_storage_versioning = false
 
+# Lifecycle del bucket media. Todas las acciones están deshabilitadas por defecto.
+object_storage_lifecycle_enabled = false
+
+# Configura únicamente las reglas necesarias con un número entero de días.
+# Archivar objetos puede generar costos de recuperación y afectar su disponibilidad.
+object_storage_archive_after_days = null
+
+# Requiere object_storage_versioning = true y elimina datos de forma irreversible.
+object_storage_delete_previous_versions_after_days = null
+
+# Aborta únicamente cargas multipart que nunca se completaron.
+object_storage_abort_multipart_uploads_after_days = null
+
+# Backup del boot volume. Deshabilitado por defecto para evitar costos inesperados.
+backup_enabled = false
+
+backup_frequency      = "WEEKLY"
+backup_type           = "INCREMENTAL"
+backup_retention_days = 28
+backup_hour_utc       = 2
+
+# Solo se utilizan para la frecuencia correspondiente.
+backup_day_of_week  = "SUNDAY"
+backup_day_of_month = 1
+
 # Observabilidad
 # Al habilitarla, notification_endpoint es obligatorio.
 monitoring_enabled = false
