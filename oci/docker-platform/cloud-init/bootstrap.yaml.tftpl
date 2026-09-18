@@ -15,6 +15,13 @@ write_files:
     permissions: '0644'
     encoding: b64
     content: ${traefik_compose_b64}
+%{ if registry_enabled ~}
+  - path: /tmp/install-ocir-helper.sh
+    owner: root:root
+    permissions: '0700'
+    encoding: b64
+    content: ${registry_helper_b64}
+%{ endif ~}
 
 runcmd:
   - dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -28,6 +35,10 @@ runcmd:
   - systemctl enable --now firewalld
 
   - usermod -aG docker opc
+%{ if registry_enabled ~}
+  - /tmp/install-ocir-helper.sh
+  - rm -f /tmp/install-ocir-helper.sh
+%{ endif ~}
 
   - firewall-cmd --permanent --add-service=ssh
   - firewall-cmd --permanent --add-service=http

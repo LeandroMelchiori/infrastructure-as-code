@@ -60,6 +60,15 @@ resource "oci_core_instance" "server" {
               }
             )
           )
+          registry_enabled = var.registry_enabled
+          registry_helper_b64 = base64encode(
+            templatefile(
+              "${path.module}/cloud-init/install-ocir-helper.sh.tftpl",
+              {
+                registry_domain = local.registry_domain
+              }
+            )
+          )
         }
       )
     )
@@ -68,6 +77,12 @@ resource "oci_core_instance" "server" {
   preserve_boot_volume = false
 
   freeform_tags = local.common_tags
+
+  # OCI no permite actualizar user_data despues del launch. Ignorarlo evita
+  # reemplazar una instancia existente al evolucionar el bootstrap.
+  lifecycle {
+    ignore_changes = [metadata["user_data"]]
+  }
 }
 
 data "oci_core_vnic_attachments" "server" {

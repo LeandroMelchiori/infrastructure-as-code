@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly registry_domain="${registry_domain}"
+readonly helper_commit="e2411c3c86c633537a8f10113c96c99c2fc71e5e"
+readonly work_dir="$(mktemp -d)"
+
+cleanup() {
+  rm -rf "$${work_dir}"
+}
+trap cleanup EXIT
+
+dnf -y install golang
+
+git clone --filter=blob:none https://github.com/jan-g/ip-credential.git "$${work_dir}/ip-credential"
+git -C "$${work_dir}/ip-credential" checkout --detach "$${helper_commit}"
+
+(
+  cd "$${work_dir}/ip-credential"
+  go build -trimpath -o "$${work_dir}/docker-credential-ocir" ./docker-credential-ocir.go
+)
+
+install -m 0755 "$${work_dir}/docker-credential-ocir" /usr/local/bin/docker-credential-ocir
+
+configure_docker_user() {
+  local home_dir="$1"
+  local owner="$2"
+
+  install -d -m 0700 -o "$${owner%%:*}" -g "$${owner##*:}" "$${home_dir}/.docker"
+  cat >"$${home_dir}/.docker/config.json" <<EOF
+{
+  "credHelpers": {
+    "$${registry_domain}": "ocir"
+  }
+}
+EOF
+  chown "$${owner}" "$${home_dir}/.docker/config.json"
+  chmod 0600 "$${home_dir}/.docker/config.json"
+}
+
+configure_docker_user /home/opc opc:opc
+configure_docker_user /root root:root
