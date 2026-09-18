@@ -13,6 +13,8 @@ locals {
     : "${var.project_name}-alerts"
   )
 
+  registry_domain = "ocir.${var.region}.oci.oraclecloud.com"
+
   common_tags = {
     Project   = var.project_name
     ManagedBy = "terraform"
