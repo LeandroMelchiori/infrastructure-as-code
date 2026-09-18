@@ -27,3 +27,16 @@ acme_email = "tu-email@example.com"
 
 # Opcional:
 # image_ocid = "ocid1.image..."
+
+# Object Storage
+# Si se deja comentado se utilizará: <project_name>-media
+# media_bucket_name = "mi-proyecto-media"
+
+# Opciones:
+# NoPublicAccess
+# ObjectReadWithoutList
+# ObjectRead
+object_storage_access_type = "NoPublicAccess"
+
+# El versionado puede aumentar el consumo de almacenamiento.
+object_storage_versioning = false

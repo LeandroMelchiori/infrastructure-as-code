@@ -94,3 +94,31 @@ variable "traefik_image" {
   type        = string
   default     = "traefik:v3.7.13"
 }
+
+variable "media_bucket_name" {
+  description = "Nombre opcional del bucket para imágenes y archivos. Si es null se genera a partir de project_name."
+  type        = string
+  default     = null
+}
+
+variable "object_storage_access_type" {
+  description = "Nivel de acceso público del bucket"
+  type        = string
+  default     = "NoPublicAccess"
+
+  validation {
+    condition = contains([
+      "NoPublicAccess",
+      "ObjectRead",
+      "ObjectReadWithoutList"
+    ], var.object_storage_access_type)
+
+    error_message = "object_storage_access_type debe ser NoPublicAccess, ObjectRead u ObjectReadWithoutList."
+  }
+}
+
+variable "object_storage_versioning" {
+  description = "Activa el versionado de objetos del bucket"
+  type        = bool
+  default     = false
+}

@@ -32,3 +32,18 @@ output "key_id" {
   description = "OCID de la KMS Key"
   value       = oci_kms_key.platform.id
 }
+
+output "object_storage_namespace" {
+  description = "Namespace de OCI Object Storage"
+  value       = data.oci_objectstorage_namespace.platform.namespace
+}
+
+output "media_bucket_name" {
+  description = "Nombre del bucket utilizado para imágenes y archivos"
+  value       = oci_objectstorage_bucket.media.name
+}
+
+output "media_bucket_access_type" {
+  description = "Tipo de acceso configurado para el bucket"
+  value       = oci_objectstorage_bucket.media.access_type
+}

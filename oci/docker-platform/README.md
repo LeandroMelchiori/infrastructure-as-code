@@ -778,3 +778,79 @@ terraform plan      ✅
 ```
 
 La prueba completa de creación y destrucción de una infraestructura descartable puede realizarse posteriormente como validación end-to-end.
+
+---
+
+## OCI Object Storage
+
+La plataforma incluye un bucket de OCI Object Storage preparado para almacenar archivos asociados a las aplicaciones desplegadas.
+
+Puede utilizarse para:
+
+- imágenes
+- documentos
+- archivos multimedia
+- logos
+- contenido institucional
+- archivos subidos por usuarios
+
+Por defecto el bucket se crea como privado:
+
+```hcl
+object_storage_access_type = "NoPublicAccess"
+```
+
+También puede configurarse:
+
+```hcl
+object_storage_access_type = "ObjectReadWithoutList"
+```
+
+para permitir acceso público a objetos individuales sin permitir el listado público del contenido del bucket.
+
+El nombre se genera automáticamente a partir de:
+
+```hcl
+project_name
+```
+
+Por ejemplo:
+
+```text
+project_name = "instituto"
+
+instituto-media
+```
+
+También puede definirse manualmente:
+
+```hcl
+media_bucket_name = "instituto-archivos"
+```
+
+### Acceso desde las aplicaciones
+
+La instancia OCI utiliza Instance Principal para acceder al bucket.
+
+```text
+Aplicación
+    │
+    ▼
+OCI Compute
+    │
+    ▼
+Instance Principal
+    │
+    ▼
+Dynamic Group
+    │
+    ▼
+IAM Policy
+    │
+    ▼
+Object Storage
+```
+
+Por este motivo no es necesario almacenar credenciales OCI dentro de los contenedores.
+
+El backend puede utilizar OCI SDK u OCI CLI para subir, consultar y eliminar objetos.
