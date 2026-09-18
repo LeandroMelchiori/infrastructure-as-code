@@ -283,6 +283,94 @@ variable "backup_day_of_month" {
   }
 }
 
+variable "logging_enabled" {
+  description = "Crea la capa opcional de OCI Logging para la infraestructura"
+  type        = bool
+  default     = false
+}
+
+variable "logging_log_group_name" {
+  description = "Nombre opcional del Log Group. Si es null se genera a partir de project_name."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.logging_log_group_name == null ? true : length(trimspace(var.logging_log_group_name)) > 0
+    error_message = "logging_log_group_name debe ser null o un nombre no vacío."
+  }
+}
+
+variable "logging_retention_days" {
+  description = "Retención de los logs en días, en incrementos de 30 hasta 180"
+  type        = number
+  default     = 30
+
+  validation {
+    condition     = contains([30, 60, 90, 120, 150, 180], var.logging_retention_days)
+    error_message = "logging_retention_days debe ser 30, 60, 90, 120, 150 o 180."
+  }
+}
+
+variable "logging_sources" {
+  description = "Fuentes de logs habilitadas cuando logging_enabled es true"
+  type        = set(string)
+  default     = ["system", "cloud-init", "docker"]
+
+  validation {
+    condition = length(setsubtract(
+      var.logging_sources,
+      toset(["system", "cloud-init", "docker"])
+    )) == 0
+    error_message = "logging_sources solo admite system, cloud-init y docker."
+  }
+
+  validation {
+    condition     = !var.logging_enabled || length(var.logging_sources) > 0
+    error_message = "logging_sources debe contener al menos una fuente cuando logging_enabled es true."
+  }
+}
+
+variable "registry_enabled" {
+  description = "Crea repositorios privados en OCI Container Registry y habilita pulls con Instance Principal"
+  type        = bool
+  default     = false
+}
+
+variable "registry_repository_names" {
+  description = "Nombres genericos de los repositorios OCIR; su longitud determina la cantidad creada"
+  type        = set(string)
+  default     = []
+
+  validation {
+    condition     = !var.registry_enabled || length(var.registry_repository_names) > 0
+    error_message = "registry_repository_names debe contener al menos un nombre cuando registry_enabled es true."
+  }
+
+  validation {
+    condition = alltrue([
+      for name in var.registry_repository_names : can(regex("^[a-z0-9]+([._/-][a-z0-9]+)*$", name))
+    ])
+    error_message = "Los repositorios deben usar minusculas, numeros y separadores '.', '_', '-' o '/'."
+  }
+}
+
+variable "registry_visibility" {
+  description = "Visibilidad comun de los repositorios OCIR"
+  type        = string
+  default     = "PRIVATE"
+
+  validation {
+    condition     = contains(["PRIVATE", "PUBLIC"], var.registry_visibility)
+    error_message = "registry_visibility debe ser PRIVATE o PUBLIC."
+  }
+}
+
+variable "registry_freeform_tags" {
+  description = "Tags libres adicionales aplicados a todos los repositorios OCIR"
+  type        = map(string)
+  default     = {}
+}
+
 variable "monitoring_enabled" {
   description = "Crea la alarma de CPU y los recursos de OCI Notifications"
   type        = bool

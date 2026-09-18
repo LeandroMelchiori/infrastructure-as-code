@@ -28,8 +28,10 @@ y obtener una plataforma OCI configurada con:
 - Docker
 - Docker Compose
 - OCI CLI
+- OCI Logging
 - OCI Monitoring
 - OCI Notifications
+- OCI Container Registry
 - firewalld
 - Traefik
 - Let's Encrypt
@@ -102,6 +104,29 @@ La aplicación que luego se despliegue sobre esta plataforma no forma parte de e
                       │
                       ▼
                  Suscripción
+
+
+                  OCI Logging
+                      │
+            Unified Monitoring Agent
+                      │
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+       Sistema    cloud-init    Docker
+                                  │
+                                  ▼
+                               Traefik
+
+
+             OCI Container Registry
+                      │
+             Repositorios privados
+                      │
+                      ▼
+          Docker credential helper
+                      │
+                      ▼
+             Instance Principal
 ```
 
 ---
@@ -300,6 +325,240 @@ cuentan. Consulta los
 [límites Always Free de OCI](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm).
 El versionado y el archivado también aumentan el almacenamiento facturable;
 recuperar objetos archivados puede tener costo.
+
+---
+
+## Logging centralizado
+
+La capa de logging utiliza OCI Logging y permanece deshabilitada por defecto:
+
+```hcl
+logging_enabled = false
+```
+
+Cuando se habilita, Terraform crea:
+
+- un Log Group;
+- un log personalizado por fuente seleccionada;
+- una configuración del Unified Monitoring Agent por fuente;
+- una política IAM limitada a `use log-content` para el Dynamic Group de la
+  instancia.
+
+No se crean recursos ni permisos de logging mientras
+`logging_enabled = false`.
+
+### Fuentes
+
+Las fuentes disponibles son:
+
+| Fuente | Rutas | Contenido |
+|---|---|---|
+| `system` | `/var/log/messages*`, `/var/log/secure*`, `/var/log/dmesg*` | sistema operativo, servicios y eventos de la instancia |
+| `cloud-init` | `/var/log/cloud-init.log`, `/var/log/cloud-init-output.log` | bootstrap y diagnóstico de cloud-init |
+| `docker` | `/var/lib/docker/containers/*/*-json.log` | stdout y stderr de los contenedores |
+
+Traefik escribe sus logs operativos a stdout mediante la configuración actual,
+por lo que se centraliza dentro de la fuente `docker`. Esto evita modificar la
+configuración del proxy o conocer aplicaciones concretas.
+
+La fuente `docker` también puede incluir logs de otros contenedores desplegados
+en el futuro. No deben escribirse secretos, tokens ni datos personales en stdout.
+Si esa política no es apropiada para un entorno, puede excluirse la fuente:
+
+```hcl
+logging_enabled = true
+
+logging_sources = [
+  "system",
+  "cloud-init"
+]
+```
+
+Configuración completa:
+
+```hcl
+logging_enabled        = true
+logging_log_group_name = "mi-proyecto-infra-logs"
+logging_retention_days = 30
+
+logging_sources = [
+  "system",
+  "cloud-init",
+  "docker"
+]
+```
+
+La retención admite `30`, `60`, `90`, `120`, `150` o `180` días.
+Reducirla hace que los eventos más antiguos dejen de estar disponibles. El
+agente comienza a leer desde el final de los archivos para evitar ingerir todo
+el historial local al activar logging por primera vez.
+
+### Unified Monitoring Agent
+
+Los logs personalizados de archivos requieren Unified Monitoring Agent. En las
+imágenes soportadas de Oracle Linux 9 se distribuye mediante Oracle Cloud Agent
+como el plugin `Custom Logs Monitoring`. Los plugins de monitoreo están
+habilitados por defecto en OCI salvo que hayan sido desactivados explícitamente.
+
+Puede verificarse el estado desde la VM:
+
+```bash
+sudo systemctl status oracle-cloud-agent
+sudo systemctl status unified-monitoring-agent
+```
+
+También puede revisarse la configuración declarada por OCI:
+
+```bash
+oci compute instance get \
+  --instance-id "<instance_ocid>" \
+  --query 'data."agent-config"."plugins-config"'
+```
+
+Si `Custom Logs Monitoring` está deshabilitado, debe habilitarse desde la
+configuración de Oracle Cloud Agent en la instancia. La instalación automática
+del Unified Monitoring Agent puede tardar varios minutos.
+
+No se modifica `compute.tf`, cloud-init ni Traefik. Activar la capa crea
+recursos de control y configuraciones del agente, pero no reemplaza ni reinicia
+la instancia. El único impacto sobre la VM es el consumo del agente y la lectura
+de los archivos seleccionados.
+
+### IAM y costos
+
+La política opcional concede solamente:
+
+```text
+Allow dynamic-group <dynamic-group> to use log-content in compartment <compartment>
+```
+
+No concede lectura de logs ni administración de Log Groups a la instancia. La
+identidad que ejecuta Terraform sí debe poder administrar recursos de Logging y
+la política IAM.
+
+OCI Logging incluye los primeros 10 GB de almacenamiento de logs por mes. El
+exceso puede generar cargos; Docker suele ser la fuente de mayor volumen. Revisa
+los [precios vigentes de OCI Logging](https://www.oracle.com/manageability/pricing/)
+y ajusta fuentes y retención según el entorno.
+
+---
+
+## OCI Container Registry
+
+La capa de registry es opcional, genérica y permanece deshabilitada por defecto:
+
+```hcl
+registry_enabled = false
+```
+
+Al habilitarla, Terraform crea un repositorio de OCI Container Registry (OCIR)
+por cada elemento de `registry_repository_names`. La cantidad se configura
+agregando o quitando nombres de ese conjunto; no existe una segunda variable de
+conteo que pueda quedar desincronizada.
+
+```hcl
+registry_enabled = true
+
+registry_repository_names = [
+  "platform/services",
+  "platform/workers"
+]
+
+registry_visibility = "PRIVATE"
+
+registry_freeform_tags = {
+  Purpose = "application-images"
+}
+```
+
+Los repositorios son privados por defecto. `PUBLIC` debe elegirse de forma
+explícita y permite pulls sin autenticación, por lo que no se recomienda para
+imágenes internas. Los tags configurados se combinan con `Project` y
+`ManagedBy` de la plataforma.
+
+Quitar un nombre o cambiar `registry_enabled` a `false` después de aplicar hace
+que Terraform proponga eliminar los repositorios administrados correspondientes.
+Revisa siempre el plan y conserva o migra las imágenes antes de aceptar una
+operación de ese tipo.
+
+Las URLs usan el endpoint recomendado por OCI:
+
+```text
+ocir.<region>.oci.oraclecloud.com/<namespace>/<repository>
+```
+
+Terraform publica el namespace, los nombres y las URLs completas como outputs.
+Esta capa solo prepara repositorios, permisos y autenticación de la VM. No
+construye imágenes, no hace push y no implementa un pipeline de deployment.
+
+### Autenticación desde Compute
+
+Docker no interpreta Instance Principal directamente. Cuando
+`registry_enabled = true`, cloud-init instala `docker-credential-ocir`, configura
+Docker para el usuario `opc` y para `root`, y utiliza OCI CLI con Instance
+Principal para obtener credenciales temporales. No se ejecuta `docker login` ni
+se guardan passwords, auth tokens o credenciales Docker en Terraform, Git o la
+VM.
+
+```text
+docker pull
+     │
+     ▼
+docker-credential-ocir
+     │
+     ▼
+OCI CLI + Instance Principal
+     │
+     ▼
+credencial temporal de OCIR
+```
+
+El helper se compila durante el primer arranque desde una revisión fijada del
+proyecto utilizado por el
+[tutorial oficial de Oracle](https://docs.oracle.com/en/learn/cred-helper/index.html).
+Esto agrega Go al bootstrap cuando el registry está habilitado y requiere salida
+HTTPS durante cloud-init.
+
+Para una instancia nueva puede verificarse:
+
+```bash
+which docker-credential-ocir
+oci iam region list --auth instance_principal
+terraform output registry_repository_urls
+docker pull ocir.<region>.oci.oraclecloud.com/<namespace>/<repository>:<tag>
+```
+
+`registry_repository_urls` es un mapa; selecciona una de sus URLs y agrega el
+tag de imagen correspondiente al ejecutar el pull.
+
+OCI no permite actualizar `metadata.user_data` después del lanzamiento. El
+recurso Compute ignora deliberadamente cambios posteriores en ese campo para no
+reemplazar la instancia. Si se habilita OCIR después del primer arranque,
+ejecuta una vez el script `cloud-init/install-ocir-helper.sh.tftpl` con el
+endpoint regional sustituido. Una VM creada desde cero con OCIR habilitado lo
+instala automáticamente. Terraform no fuerza una recreación.
+
+### IAM, costos y límites
+
+La policy opcional concede al Dynamic Group existente solo:
+
+```text
+Allow dynamic-group <dynamic-group> to read repos in compartment <compartment>
+```
+
+La instancia puede hacer pull de cualquier repositorio del compartment, pero no
+crear repositorios, hacer push ni borrarlos. La identidad que ejecuta Terraform
+debe poder administrar repositorios de Artifacts y políticas IAM.
+
+OCIR no tiene un cargo adicional por el servicio, pero el almacenamiento de las
+imágenes se factura a la tarifa de Object Storage Standard. Por eso no se debe
+asumir que las imágenes están cubiertas por Always Free, aunque los repositorios
+vacíos tengan consumo despreciable. La documentación vigente establece límites
+regionales de 500 repositorios, 100.000 imágenes por repositorio y 500 GB de
+almacenamiento. Consulta el
+[resumen de OCIR](https://docs.oracle.com/en-us/iaas/Content/Registry/Concepts/registryoverview.htm)
+y la [lista de precios](https://www.oracle.com/cloud/price-list/) antes de subir
+imágenes de gran tamaño.
 
 ---
 
@@ -639,10 +898,12 @@ docker-platform/
 ├── compute.tf
 ├── iam.tf
 ├── locals.tf
+├── logging.tf
 ├── network.tf
 ├── observability.tf
 ├── outputs.tf
 ├── providers.tf
+├── registry.tf
 ├── security.tf
 ├── variables.tf
 ├── vault.tf
@@ -651,7 +912,8 @@ docker-platform/
 ├── .terraform.lock.hcl
 │
 ├── cloud-init/
-│   └── bootstrap.yaml.tftpl
+│   ├── bootstrap.yaml.tftpl
+│   └── install-ocir-helper.sh.tftpl
 │
 └── proxy/
     └── docker-compose.yml.tftpl
@@ -696,6 +958,14 @@ backup_retention_days
 backup_hour_utc
 backup_day_of_week
 backup_day_of_month
+logging_enabled
+logging_log_group_name
+logging_retention_days
+logging_sources
+registry_enabled
+registry_repository_names
+registry_visibility
+registry_freeform_tags
 monitoring_enabled
 notification_topic_name
 notification_protocol
@@ -741,6 +1011,10 @@ ssh_source_cidr = "0.0.0.0/0"
 acme_email = "correo@example.com"
 
 backup_enabled = false
+
+logging_enabled = false
+
+registry_enabled = false
 
 monitoring_enabled = false
 ```
@@ -884,6 +1158,17 @@ backup_enabled
 boot_volume_id
 boot_volume_backup_policy_id
 boot_volume_backup_policy_assignment_id
+logging_enabled
+logging_status
+log_group_id
+logs_created
+logging_agent_configuration_ids
+registry_enabled
+registry_status
+registry_namespace
+registry_repository_count
+registry_repository_names
+registry_repository_urls
 monitoring_enabled
 notification_topic_id
 notification_subscription_id
@@ -1061,8 +1346,12 @@ Esto permitió comprobar que la plantilla representa una infraestructura indepen
 
 Al habilitar la observabilidad se agregan tres recursos opcionales: topic,
 suscripción y alarma. Al habilitar backups se agregan una política y su
-asignación; lifecycle agrega una política sobre el bucket existente. Antes de
-aplicar, verifica que el plan no reemplace ni destruya recursos existentes.
+asignación; lifecycle agrega una política sobre el bucket existente. Logging
+agrega un Log Group, un log y una configuración de agente por fuente, además de
+una política IAM de ingestión. Antes de aplicar, verifica que el plan no
+reemplace ni destruya recursos existentes. Registry agrega un recurso por nombre
+configurado y una policy IAM de solo lectura. El cambio de cloud-init queda
+ignorado para instancias existentes, por lo que no reemplaza Compute.
 
 ---
 

@@ -74,6 +74,40 @@ backup_hour_utc       = 2
 backup_day_of_week  = "SUNDAY"
 backup_day_of_month = 1
 
+# Logging centralizado. Deshabilitado por defecto para evitar ingestión y costos.
+logging_enabled = false
+
+# null utiliza: <project_name>-logs
+logging_log_group_name = null
+
+# Valores permitidos: 30, 60, 90, 120, 150 o 180 días.
+logging_retention_days = 30
+
+# docker incluye stdout/stderr de Traefik y del resto de contenedores.
+logging_sources = [
+  "system",
+  "cloud-init",
+  "docker"
+]
+
+# OCI Container Registry. Deshabilitado por defecto; no crea repositorios ni IAM adicional.
+registry_enabled = false
+
+# La cantidad de elementos determina la cantidad de repositorios creados.
+# Usa nombres genericos de plataforma; no incluyas credenciales ni datos sensibles.
+registry_repository_names = [
+  "platform/services",
+  "platform/workers"
+]
+
+# Valores permitidos: PRIVATE o PUBLIC. PRIVATE es el valor seguro por defecto.
+registry_visibility = "PRIVATE"
+
+# Tags libres comunes, adicionales a Project y ManagedBy.
+registry_freeform_tags = {
+  Purpose = "application-images"
+}
+
 # Observabilidad
 # Al habilitarla, notification_endpoint es obligatorio.
 monitoring_enabled = false

@@ -78,6 +78,73 @@ output "boot_volume_backup_policy_assignment_id" {
   value       = try(oci_core_volume_backup_policy_assignment.boot[0].id, null)
 }
 
+output "logging_enabled" {
+  description = "Indica si la capa de logging centralizado está habilitada"
+  value       = var.logging_enabled
+}
+
+output "logging_status" {
+  description = "Estado lógico de la capa de logging centralizado"
+  value       = var.logging_enabled ? "ENABLED" : "DISABLED"
+}
+
+output "log_group_id" {
+  description = "OCID del Log Group, o null si logging está deshabilitado"
+  value       = try(oci_logging_log_group.platform[0].id, null)
+}
+
+output "logs_created" {
+  description = "Logs personalizados creados, indexados por fuente"
+  value = {
+    for name, log in oci_logging_log.platform : name => {
+      id           = log.id
+      display_name = log.display_name
+      state        = log.state
+    }
+  }
+}
+
+output "logging_agent_configuration_ids" {
+  description = "OCIDs de las configuraciones del Unified Monitoring Agent"
+  value = {
+    for name, configuration in oci_logging_unified_agent_configuration.platform :
+    name => configuration.id
+  }
+}
+
+output "registry_enabled" {
+  description = "Indica si OCI Container Registry esta habilitado"
+  value       = var.registry_enabled
+}
+
+output "registry_status" {
+  description = "Estado logico de la capa de OCI Container Registry"
+  value       = var.registry_enabled ? "ENABLED" : "DISABLED"
+}
+
+output "registry_namespace" {
+  description = "Namespace de la tenancy utilizado por OCIR"
+  value       = data.oci_objectstorage_namespace.platform.namespace
+}
+
+output "registry_repository_count" {
+  description = "Cantidad de repositorios OCIR administrados por esta arquitectura"
+  value       = length(oci_artifacts_container_repository.platform)
+}
+
+output "registry_repository_names" {
+  description = "Nombres de los repositorios OCIR creados"
+  value       = sort(keys(oci_artifacts_container_repository.platform))
+}
+
+output "registry_repository_urls" {
+  description = "URLs completas de los repositorios OCIR, indexadas por nombre"
+  value = {
+    for name, repository in oci_artifacts_container_repository.platform :
+    name => "${local.registry_domain}/${repository.namespace}/${repository.display_name}"
+  }
+}
+
 output "monitoring_enabled" {
   description = "Indica si la observabilidad opcional está habilitada"
   value       = var.monitoring_enabled
