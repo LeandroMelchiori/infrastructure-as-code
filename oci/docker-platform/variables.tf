@@ -30,6 +30,12 @@ variable "oci_auth" {
   default     = "InstancePrincipal"
 }
 
+variable "oci_config_file_profile" {
+  description = "Perfil del archivo de configuración OCI, usado por APIKey o SecurityToken"
+  type        = string
+  default     = "DEFAULT"
+}
+
 variable "vcn_cidr" {
   description = "CIDR de la VCN"
   type        = string

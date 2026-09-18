@@ -7,8 +7,16 @@ compartment_name = "mi-compartment"
 project_name = "mi-proyecto"
 
 # Región
-region   = "sa-saopaulo-1"
-oci_auth = "InstancePrincipal"
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
+
+# En OCI Cloud Shell, crea un perfil de sesión y utiliza:
+# oci_auth                = "SecurityToken"
+# oci_config_file_profile = "TERRAFORM"
+#
+# La configuración del backend remoto no pertenece a este archivo.
+# Usa backend.oci.tfbackend (ignorado por Git).
 
 # Compute
 ocpus         = 2

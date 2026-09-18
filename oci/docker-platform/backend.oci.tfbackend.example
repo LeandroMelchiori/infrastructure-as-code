@@ -1,0 +1,14 @@
+# Copia este archivo como backend.oci.tfbackend y reemplaza los placeholders.
+# No agregues credenciales, tokens ni claves privadas.
+
+bucket    = "REEMPLAZAR_BUCKET_TERRAFORM_STATE"
+namespace = "REEMPLAZAR_NAMESPACE"
+key       = "docker-platform/terraform.tfstate"
+region    = "sa-saopaulo-1"
+
+# OCI Compute con una Dynamic Group y una policy adecuadas:
+# auth = "InstancePrincipal"
+
+# OCI Cloud Shell o una sesión local autenticada:
+# auth                = "SecurityToken"
+# config_file_profile = "TERRAFORM"

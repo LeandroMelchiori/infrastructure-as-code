@@ -1,0 +1,13 @@
+# El OCID no es una credencial, pero reemplázalo solo en terraform.tfvars.
+compartment_ocid = "ocid1.compartment.oc1..REEMPLAZAR"
+
+# Debe ser único dentro del namespace de Object Storage.
+state_bucket_name = "mi-organizacion-terraform-state"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
+
+# En OCI Cloud Shell, crea un perfil de sesión y utiliza:
+# oci_auth                = "SecurityToken"
+# oci_config_file_profile = "TERRAFORM"

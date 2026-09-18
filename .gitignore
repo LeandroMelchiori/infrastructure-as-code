@@ -5,6 +5,9 @@
 **/terraform.tfvars
 **/*.auto.tfvars
 
+# Terraform backend configuration
+**/*.tfbackend
+
 # Terraform state
 **/*.tfstate
 **/*.tfstate.*

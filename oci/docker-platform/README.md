@@ -11,7 +11,7 @@ La infraestructura está diseñada para ser independiente de las aplicaciones. S
 Esta arquitectura permite ejecutar:
 
 ```bash
-terraform init
+terraform init -backend-config=backend.oci.tfbackend
 terraform plan
 terraform apply
 ```
@@ -416,6 +416,7 @@ Aplicaciones
 docker-platform/
 │
 ├── README.md
+├── backend.oci.tfbackend.example
 ├── compute.tf
 ├── iam.tf
 ├── locals.tf
@@ -449,6 +450,7 @@ compartment_name
 project_name
 region
 oci_auth
+oci_config_file_profile
 vcn_cidr
 public_subnet_cidr
 ssh_public_key_path
@@ -460,6 +462,9 @@ boot_volume_size_in_gbs
 image_ocid
 acme_email
 traefik_image
+media_bucket_name
+object_storage_access_type
+object_storage_versioning
 ```
 
 ---
@@ -481,8 +486,9 @@ compartment_name = "mi-compartment"
 
 project_name = "mi-proyecto"
 
-region   = "sa-saopaulo-1"
-oci_auth = "InstancePrincipal"
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
 
 ocpus         = 2
 memory_in_gbs = 12
@@ -509,11 +515,68 @@ no debe almacenarse en Git.
 
 ## Inicialización
 
-Inicializar Terraform:
+Esta arquitectura utiliza el backend nativo de OCI, disponible desde Terraform
+1.12.0. Primero crea el bucket dedicado mediante
+[`../terraform-state`](../terraform-state/) y consulta sus outputs.
+
+Crea la configuración local del backend:
 
 ```bash
-terraform init
+cp backend.oci.tfbackend.example backend.oci.tfbackend
 ```
+
+Reemplaza `bucket` y `namespace` con los outputs del bootstrap. Conserva la clave
+exclusiva:
+
+```hcl
+key = "docker-platform/terraform.tfstate"
+```
+
+`backend.oci.tfbackend` está ignorado por Git. No agregues allí claves privadas,
+tokens ni contraseñas. Terraform carga el backend antes que las variables, por lo
+que esta configuración no pertenece a `terraform.tfvars`.
+
+Inicializa Terraform:
+
+```bash
+terraform init -backend-config=backend.oci.tfbackend
+```
+
+---
+
+## OCI Cloud Shell
+
+Cloud Shell incluye Terraform y OCI CLI. Comprueba primero que la versión sea
+1.12.0 o posterior:
+
+```bash
+terraform version
+```
+
+La autenticación preconfigurada de OCI CLI en Cloud Shell usa un token delegado.
+Para que el provider y el backend nativo compartan una autenticación soportada,
+crea un perfil temporal:
+
+```bash
+oci session authenticate --profile-name TERRAFORM
+```
+
+Configura `terraform.tfvars`:
+
+```hcl
+oci_auth                = "SecurityToken"
+oci_config_file_profile = "TERRAFORM"
+```
+
+Y agrega localmente a `backend.oci.tfbackend`:
+
+```hcl
+auth                = "SecurityToken"
+config_file_profile = "TERRAFORM"
+```
+
+No subas el perfil ni su token a Git. Si la sesión expira, renuévala antes de
+ejecutar `plan` o `apply`.
 
 ---
 
@@ -679,15 +742,45 @@ sí forma parte del repositorio porque documenta la configuración necesaria.
 
 ## Terraform State
 
-Actualmente la plantilla permite trabajar con Terraform State local.
+El state se almacena en un bucket privado y versionado separado del bucket
+`media`. El backend nativo de OCI añade bloqueo mediante un objeto temporal, por
+lo que evita operaciones concurrentes sobre la misma clave.
 
-Para entornos colaborativos o productivos se recomienda evolucionar hacia un backend remoto con:
+Cada arquitectura debe usar una clave distinta:
 
-- almacenamiento remoto
-- cifrado
-- versionado
-- control de acceso
-- bloqueo de estado
+```text
+docker-platform/terraform.tfstate
+otra-arquitectura/terraform.tfstate
+```
+
+La identidad que ejecuta Terraform necesita permisos `OBJECT_INSPECT`,
+`OBJECT_CREATE`, `OBJECT_READ` y `OBJECT_DELETE` sobre el bucket de state. No
+concedas esos permisos al Dynamic Group del servidor Docker.
+
+### Migrar desde state local
+
+1. Detén ejecuciones concurrentes de Terraform.
+2. Crea el bucket con `oci/terraform-state` y configura los permisos IAM.
+3. Realiza una copia segura de `terraform.tfstate` fuera del repositorio.
+4. Crea `backend.oci.tfbackend` desde el ejemplo y verifica especialmente
+   `bucket`, `namespace`, `region` y `key`.
+5. Ejecuta:
+
+```bash
+terraform init -migrate-state -backend-config=backend.oci.tfbackend
+```
+
+Terraform solicitará confirmación antes de copiar el state local. Después de la
+migración:
+
+```bash
+terraform state list
+terraform plan
+```
+
+El plan esperado no debe proponer cambios por el solo hecho de mover el state.
+Conserva temporalmente la copia local hasta verificar el objeto remoto y su
+versionado. Los archivos `*.tfstate*` continúan ignorados por Git.
 
 ---
 
