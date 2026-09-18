@@ -1,0 +1,29 @@
+# Identidad OCI
+tenancy_ocid     = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name = "mi-compartment"
+
+# Proyecto
+project_name = "mi-proyecto"
+
+# Región
+region   = "sa-saopaulo-1"
+oci_auth = "InstancePrincipal"
+
+# Compute
+ocpus         = 2
+memory_in_gbs = 12
+
+# Networking
+vcn_cidr           = "10.20.0.0/16"
+public_subnet_cidr = "10.20.1.0/24"
+
+# SSH
+ssh_public_key_path = "~/.ssh/cloudshellkey.pub"
+ssh_source_cidr     = "0.0.0.0/0"
+
+# HTTPS
+acme_email = "tu-email@example.com"
+
+# Opcional:
+# image_ocid = "ocid1.image..."
