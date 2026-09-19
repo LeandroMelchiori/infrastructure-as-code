@@ -32,6 +32,7 @@ y obtener una plataforma OCI configurada con:
 - OCI Monitoring
 - OCI Notifications
 - OCI Container Registry
+- Base restringida para CI/CD de aplicaciones
 - firewalld
 - Traefik
 - Let's Encrypt
@@ -127,6 +128,26 @@ La aplicación que luego se despliegue sobre esta plataforma no forma parte de e
                       │
                       ▼
              Instance Principal
+
+
+           Repositorio de aplicación
+                      │
+                GitHub Actions
+                      │
+          test -> build -> scan -> push
+                      │
+                      ▼
+                     OCIR
+                      │
+                OCI Run Command
+                      │
+                      ▼
+         deploy-compose-app <app> <sha>
+                      │
+         Compose root-owned + digest
+                      │
+                      ▼
+              Traefik + health check
 ```
 
 ---
@@ -465,6 +486,7 @@ registry_repository_names = [
 ]
 
 registry_visibility = "PRIVATE"
+registry_immutable  = null
 
 registry_freeform_tags = {
   Purpose = "application-images"
@@ -475,6 +497,13 @@ Los repositorios son privados por defecto. `PUBLIC` debe elegirse de forma
 explícita y permite pulls sin autenticación, por lo que no se recomienda para
 imágenes internas. Los tags configurados se combinan con `Project` y
 `ManagedBy` de la plataforma.
+
+`registry_immutable` controla la inmutabilidad nativa de OCIR. Se conserva en
+`null` por defecto para no administrar ni modificar repositorios existentes,
+pero debe ser
+`true` al habilitar deployments. En un repositorio inmutable una imagen ya
+publicada no puede sobrescribirse, por lo que un tag basado en commit SHA queda
+protegido por OCI y no solo por una convención del workflow.
 
 Quitar un nombre o cambiar `registry_enabled` a `false` después de aplicar hace
 que Terraform proponga eliminar los repositorios administrados correspondientes.
@@ -488,8 +517,8 @@ ocir.<region>.oci.oraclecloud.com/<namespace>/<repository>
 ```
 
 Terraform publica el namespace, los nombres y las URLs completas como outputs.
-Esta capa solo prepara repositorios, permisos y autenticación de la VM. No
-construye imágenes, no hace push y no implementa un pipeline de deployment.
+La capa de registry no construye ni publica imágenes. La base opcional de
+deployment se describe más adelante y permanece separada de estos recursos.
 
 ### Autenticación desde Compute
 
@@ -896,6 +925,7 @@ docker-platform/
 ├── backup.tf
 ├── backend.oci.tfbackend.example
 ├── compute.tf
+├── deployment.tf
 ├── iam.tf
 ├── locals.tf
 ├── logging.tf
@@ -913,7 +943,15 @@ docker-platform/
 │
 ├── cloud-init/
 │   ├── bootstrap.yaml.tftpl
+│   ├── deploy-compose-app.py
 │   └── install-ocir-helper.sh.tftpl
+│
+├── deployment/
+│   ├── README.md
+│   ├── app-config.example.json
+│   ├── compose.example.yml
+│   └── github-actions/
+│       └── deploy.yml.example
 │
 └── proxy/
     └── docker-compose.yml.tftpl
@@ -965,7 +1003,10 @@ logging_sources
 registry_enabled
 registry_repository_names
 registry_visibility
+registry_immutable
 registry_freeform_tags
+deployment_enabled
+deployment_principals
 monitoring_enabled
 notification_topic_name
 notification_protocol
@@ -1015,6 +1056,10 @@ backup_enabled = false
 logging_enabled = false
 
 registry_enabled = false
+
+registry_immutable = null
+
+deployment_enabled = false
 
 monitoring_enabled = false
 ```
@@ -1192,51 +1237,126 @@ Se recomienda revisar cuidadosamente el plan de destrucción antes de confirmarl
 
 ## Despliegue de aplicaciones
 
-Las aplicaciones se mantienen fuera de esta plantilla.
+Las aplicaciones, sus tests y sus Dockerfiles permanecen en repositorios
+separados. Esta arquitectura aporta únicamente un contrato de deployment
+restringido y deshabilitado por defecto:
 
-Una aplicación que quiera utilizar Traefik debe conectarse a la red externa:
-
-```yaml
-networks:
-  proxy:
-    external: true
+```hcl
+deployment_enabled = false
 ```
 
-Ejemplo de configuración mediante labels:
+Al habilitarlo también deben habilitarse el registry y su inmutabilidad:
 
-```yaml
-services:
-  app:
-    image: mi-aplicacion
-
-    networks:
-      - proxy
-
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.app.rule=Host(`app.example.com`)"
-      - "traefik.http.routers.app.entrypoints=websecure"
-      - "traefik.http.routers.app.tls=true"
-      - "traefik.http.routers.app.tls.certresolver=letsencrypt"
-
-networks:
-  proxy:
-    external: true
+```hcl
+registry_enabled   = true
+registry_immutable = true
+deployment_enabled = true
 ```
 
-De esta manera:
+### Separación de pipelines
+
+La CI de este repositorio ejecuta validación y plan de Terraform. Nunca debe
+construir o desplegar aplicaciones.
+
+Cada repositorio de aplicación mantiene su propio workflow para:
 
 ```text
-Internet
-   │
-   ▼
-Traefik
-   │
-   ▼
-Aplicación
+test -> build -> security scan -> push SHA -> Run Command -> health check
 ```
 
-sin publicar directamente el puerto interno de la aplicación.
+El workflow de referencia está en
+[`deployment/github-actions/deploy.yml.example`](deployment/github-actions/deploy.yml.example).
+No usa `latest` y despliega siempre el SHA completo de `GITHUB_SHA`.
+
+### Autenticación y mínimo privilegio
+
+Terraform no crea usuarios, API keys, auth tokens, passwords ni membresías. La
+autenticación queda desacoplada mediante principales IAM preexistentes:
+
+```hcl
+deployment_principals = {
+  service-a = {
+    principal_type   = "dynamic-group"
+    principal_name   = "github-runner-service-a-dg"
+    repository_names = ["platform/service-a"]
+  }
+}
+```
+
+Se recomienda un principal por aplicación o dominio de confianza. Cada policy
+permite `REPOSITORY_READ` y `REPOSITORY_UPDATE` solamente sobre los nombres
+indicados; no permite crear, borrar ni administrar otros repositorios. También
+permite solicitar OCI Run Command en el compartment.
+
+El ejemplo presupone un runner OCI dedicado, preferentemente efímero, con
+Instance Principal, OCI CLI y `docker-credential-ocir`. Así no existen
+credenciales OCI permanentes en GitHub. OCI Identity Domains soporta intercambio
+de JWT externos por tokens temporales, pero GitHub OIDC hacia OCI/OCIR requiere
+configuración de federación adicional y no se implementa aquí como integración
+turnkey.
+
+### Wrapper privilegiado
+
+OCI Run Command ejecuta inicialmente como `ocarun`. La única elevación
+permitida es:
+
+```text
+deploy-compose-app <app> <commit-sha>
+```
+
+El wrapper exige exactamente esos dos argumentos. El repositorio, Compose,
+servicio, health check e imágenes auxiliares están definidos en archivos
+`root:root` bajo `/etc/docker-platform/apps/<app>`. `ocarun` no pertenece al
+grupo Docker y no puede escribir la configuración ni `/opt/apps/apps`.
+
+Antes de cualquier pull o `compose up`, el wrapper normaliza y valida el Compose
+contra un esquema cerrado. Rechaza campos desconocidos, symlinks, bind mounts,
+`privileged`, Docker socket, namespaces del host, devices, `cap_add`, ports
+publicados, builds y cualquier imagen no autorizada.
+
+Después de validar, descarga `<repository>:<commit-sha>`, resuelve su digest y
+vuelve a validar. Tanto `compose pull` como `compose up` reciben exclusivamente
+`<repository>@sha256:...`. El rollback conserva el Compose y digest anteriores.
+Los logs incluyen aplicación, SHA, digest y etapa, pero no configuración,
+variables de entorno, URLs ni salidas que puedan contener secretos.
+
+Consulta [`deployment/README.md`](deployment/README.md) para registrar una
+aplicación y preparar manualmente una VM existente.
+
+### Impacto sobre Compute
+
+El cambio de cloud-init solo prepara instancias nuevas. `compute.tf` continúa
+ignorando cambios posteriores en `metadata.user_data`, por lo que habilitar esta
+capa no modifica ni reemplaza la instancia existente. La instalación inicial
+del wrapper en una VM ya creada es una operación administrativa explícita.
+
+### Disponibilidad y riesgo residual
+
+Descargar antes de ejecutar `compose up` reduce el intervalo de recreación y un
+health check fallido activa rollback. Docker Compose sobre una sola VM no puede
+garantizar cero downtime; blue/green real requiere diseño específico de la
+aplicación o más capacidad.
+
+Una imagen maliciosa todavía puede comprometer todos los recursos que el Compose
+autorizado exponga al contenedor, incluidos named volumes, redes, variables y
+servicios alcanzables. También puede explotar vulnerabilidades del kernel o del
+runtime. Esta arquitectura reduce los privilegios del pipeline, pero no
+convierte un contenedor malicioso en seguro.
+
+Run Command no informa al wrapper qué principal originó el comando. Un principal
+compartido puede solicitar el redeployment de cualquier nombre conocido en la
+allowlist local, aunque solo pueda publicar en sus repositorios autorizados.
+Usa GitHub Environments con aprobación, branch protection y principales
+separados; para aislamiento completo se requieren hosts o un broker por dominio
+de confianza.
+
+### Costos
+
+La capa no crea Compute, buckets ni servicios de build. Puede generar costos por
+el runner elegido, minutos de GitHub Actions, almacenamiento y transferencia de
+imágenes OCIR, y escaneo de imágenes. OCI Run Command y las policies IAM no
+añaden almacenamiento por sí mismos. La acumulación de imágenes inmutables debe
+gestionarse mediante una política operativa de limpieza revisada por separado.
 
 ---
 
@@ -1325,6 +1445,124 @@ versionado. Los archivos `*.tfstate*` continúan ignorados por Git.
 
 ---
 
+## Detección automática de drift
+
+El workflow [`.github/workflows/terraform-drift.yml`](../../.github/workflows/terraform-drift.yml)
+compara periódicamente la configuración Terraform versionada con la
+infraestructura que OCI devuelve al refrescar el state remoto. Se puede ejecutar:
+
+- manualmente desde **Actions > Terraform Drift Detection > Run workflow**;
+- automáticamente cada lunes a las `06:17 UTC`, solamente cuando la variable de
+  repositorio `DRIFT_DETECTION_ENABLED` tiene el valor exacto `true`.
+
+La ejecución programada está desactivada por defecto. Configúrala desde
+**Settings > Secrets and variables > Actions > Variables**:
+
+```text
+DRIFT_DETECTION_ENABLED = true
+```
+
+Si la variable no existe, contiene `false` o cualquier valor distinto de `true`,
+GitHub crea la ejecución programada pero omite el job y no ejecuta Terraform. La
+comparación distingue mayúsculas y minúsculas. `workflow_dispatch` no depende de
+esta variable: una ejecución manual siempre puede iniciar el job aunque la
+detección automática esté desactivada.
+
+El control ejecuta `terraform init`, `terraform validate` y:
+
+```bash
+terraform plan -detailed-exitcode
+```
+
+Un plan normal puede detectar tanto cambios realizados fuera de Terraform como
+código versionado que todavía no fue aplicado. Por eso, el exit code `2` exige
+revisión humana antes de decidir si debe corregirse OCI o actualizarse el código.
+
+### Runner y autenticación
+
+La ejecución programada usa un runner OCI self-hosted dedicado y autenticado con
+Instance Principal. No utiliza API keys, auth tokens ni claves privadas de OCI en
+GitHub. Configura la variable de repositorio `OCI_TERRAFORM_RUNNER_LABEL` con la
+etiqueta asignada a ese runner; si no existe, el workflow busca la etiqueta
+`oci-terraform`. Mantén actualizado GitHub Actions Runner para que soporte el
+runtime Node.js 24 utilizado por `hashicorp/setup-terraform` v4.
+
+El runner debe mantener fuera del checkout estos archivos protegidos:
+
+```text
+/etc/terraform/oci/docker-platform/backend.oci.tfbackend
+/etc/terraform/oci/docker-platform/terraform.tfvars
+```
+
+Ambos deben ser archivos regulares, no symlinks, y no pueden ser escribibles por
+grupo ni por otros usuarios. El primero conserva la configuración del backend
+remoto dedicado e incluye:
+
+```hcl
+auth = "InstancePrincipal"
+```
+
+El segundo contiene los valores reales de la arquitectura y configura:
+
+```hcl
+oci_auth = "InstancePrincipal"
+```
+
+El `ssh_public_key_path` utilizado por Terraform debe apuntar a una clave pública
+disponible para el runner. Estos archivos pueden contener datos operativos y no
+deben copiarse al repositorio, a artifacts ni al resumen del workflow.
+
+No se requieren GitHub Actions secrets en este modo. La identidad del runner
+necesita exclusivamente:
+
+- acceso al bucket dedicado de state para leer el objeto y gestionar su lock;
+- permisos de lectura sobre los tipos de recursos OCI administrados por esta
+  arquitectura;
+- ningún permiso para crear, actualizar o eliminar recursos durante este control.
+
+No reutilices el Dynamic Group de la VM Docker. Mantén un principal separado para
+el runner de Terraform y limita su pertenencia a una instancia dedicada siempre
+que sea posible. Protege también la rama por defecto: Terraform puede evaluar
+data sources y código versionado durante un plan.
+
+### Interpretar el resultado
+
+| Exit code | Resultado | Estado del workflow |
+| --- | --- | --- |
+| `0` | No hay diferencias | Correcto |
+| `1` | Error de Terraform, autenticación, backend o provider | Fallo |
+| `2` | Existen cambios pendientes | Fallo con advertencia de drift |
+
+El resumen de GitHub Actions incluye únicamente la arquitectura, el commit, la
+fecha, el exit code y la clasificación. El output completo del plan se guarda
+temporalmente con permisos restrictivos y se elimina al terminar; no se publica
+el state, un archivo de plan, variables ni artifacts.
+
+### Responder ante drift
+
+1. No ejecutes `apply` desde el workflow ni desde un entorno no controlado.
+2. Comprueba si hubo un cambio manual autorizado o código fusionado aún no
+   aplicado.
+3. Desde un entorno protegido, renueva la autenticación y ejecuta nuevamente
+   `terraform plan` contra el mismo backend y las mismas variables.
+4. Revisa reemplazos, destrucciones, IAM, Compute, buckets, Vault y KMS.
+5. Si OCI fue modificado por error, corrígelo mediante un cambio Terraform
+   revisado. Si el cambio externo es la nueva intención, actualiza o importa el
+   código/state de forma explícita.
+6. Conserva evidencia de la decisión y vuelve a ejecutar el workflow hasta
+   obtener exit code `0`.
+
+El workflow nunca ejecuta `terraform apply` y no crea Issues automáticamente. Si
+se incorpora esa capacidad en el futuro, debe evitar duplicados, usar permisos
+`issues: write` únicamente y no incluir el contenido del plan.
+
+La implementación usa una matriz con una sola entrada para
+`oci/docker-platform`. Para incorporar otra arquitectura, agrega una entrada con
+su directorio de trabajo y las rutas protegidas de backend y variables; no
+dupliques la lógica de inicialización, plan o clasificación.
+
+---
+
 ## Validación de la plantilla
 
 La configuración fue validada utilizando:
@@ -1352,6 +1590,9 @@ una política IAM de ingestión. Antes de aplicar, verifica que el plan no
 reemplace ni destruya recursos existentes. Registry agrega un recurso por nombre
 configurado y una policy IAM de solo lectura. El cambio de cloud-init queda
 ignorado para instancias existentes, por lo que no reemplaza Compute.
+Deployment agrega una policy para la instancia y una por principal configurado;
+no crea aplicaciones, credenciales ni buckets. La inmutabilidad de OCIR es una
+actualización in-place que solo se exige cuando `deployment_enabled` es `true`.
 
 ---
 

@@ -22,6 +22,19 @@ write_files:
     encoding: b64
     content: ${registry_helper_b64}
 %{ endif ~}
+%{ if deployment_enabled ~}
+  - path: /usr/local/sbin/deploy-compose-app
+    owner: root:root
+    permissions: '0755'
+    encoding: b64
+    content: ${deployment_wrapper_b64}
+  - path: /etc/sudoers.d/101-oracle-cloud-agent-deploy
+    owner: root:root
+    permissions: '0440'
+    content: |
+      Defaults!/usr/local/sbin/deploy-compose-app env_reset,secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      ocarun ALL=(root) NOPASSWD: /usr/local/sbin/deploy-compose-app
+%{ endif ~}
 
 runcmd:
   - dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
@@ -39,6 +52,12 @@ runcmd:
   - /tmp/install-ocir-helper.sh
   - rm -f /tmp/install-ocir-helper.sh
 %{ endif ~}
+%{ if deployment_enabled ~}
+  - install -d -o root -g root -m 0750 /etc/docker-platform
+  - install -d -o root -g root -m 0750 /etc/docker-platform/apps
+  - visudo -cf /etc/sudoers.d/101-oracle-cloud-agent-deploy
+  - systemctl enable --now oracle-cloud-agent
+%{ endif ~}
 
   - firewall-cmd --permanent --add-service=ssh
   - firewall-cmd --permanent --add-service=http
@@ -55,6 +74,10 @@ runcmd:
   - chmod 600 /opt/apps/proxy/letsencrypt/acme.json
 
   - chown -R opc:opc /opt/apps
+%{ if deployment_enabled ~}
+  - chown root:root /opt/apps/apps
+  - chmod 0750 /opt/apps/apps
+%{ endif ~}
 
   - docker network inspect proxy >/dev/null 2>&1 || docker network create proxy
 

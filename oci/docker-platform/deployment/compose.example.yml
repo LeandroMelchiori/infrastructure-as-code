@@ -1,0 +1,25 @@
+services:
+  app:
+    image: ${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    expose:
+      - "8080"
+    networks:
+      - proxy
+    labels:
+      traefik.enable: "true"
+      traefik.http.routers.example.entrypoints: websecure
+      traefik.http.routers.example.rule: Host(`app.example.com`)
+      traefik.http.routers.example.tls.certresolver: letsencrypt
+
+networks:
+  proxy:
+    external: true
+    name: proxy

@@ -103,9 +103,29 @@ registry_repository_names = [
 # Valores permitidos: PRIVATE o PUBLIC. PRIVATE es el valor seguro por defecto.
 registry_visibility = "PRIVATE"
 
+# null no administra el atributo y preserva repositorios existentes.
+# Usa true antes de habilitar deployment.
+registry_immutable = null
+
 # Tags libres comunes, adicionales a Project y ManagedBy.
 registry_freeform_tags = {
   Purpose = "application-images"
+}
+
+# Base generica de CI/CD. Requiere registry_enabled = true y
+# registry_immutable = true.
+# Deshabilitada por defecto y no registra aplicaciones ni crea credenciales.
+deployment_enabled = false
+
+# Principales IAM preexistentes. Usa un principal separado por aplicacion o
+# dominio de confianza y limita cada uno a repositorios ya creados por Terraform.
+# No se crean usuarios, dynamic groups, API keys ni auth tokens.
+deployment_principals = {
+  # app-domain = {
+  #   principal_type   = "dynamic-group" # o "group"
+  #   principal_name   = "github-runner-app-dg"
+  #   repository_names = ["platform/services"]
+  # }
 }
 
 # Observabilidad

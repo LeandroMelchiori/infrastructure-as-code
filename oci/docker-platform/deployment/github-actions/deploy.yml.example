@@ -1,0 +1,169 @@
+name: Application CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Optional immutable release alias
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Test
+        env:
+          TEST_COMMAND: ${{ vars.TEST_COMMAND }}
+        run: |
+          set -euo pipefail
+          test -n "$TEST_COMMAND"
+          bash -euo pipefail -c "$TEST_COMMAND"
+
+  build-scan-push-deploy:
+    needs: test
+    runs-on: ${{ vars.OCI_RUNNER_LABEL }}
+    environment: production
+    env:
+      APP_NAME: ${{ vars.DEPLOY_APP_NAME }}
+      OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+      OCI_INSTANCE_OCID: ${{ vars.OCI_INSTANCE_OCID }}
+      OCIR_REPOSITORY_URL: ${{ vars.OCIR_REPOSITORY_URL }}
+      HEALTHCHECK_URL: ${{ vars.DEPLOY_HEALTHCHECK_URL }}
+      DOCKERFILE: ${{ vars.DOCKERFILE || 'Dockerfile' }}
+      BUILD_CONTEXT: ${{ vars.DOCKER_BUILD_CONTEXT || '.' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Validate deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APP_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]]
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$OCIR_REPOSITORY_URL" =~ ^ocir\.[a-z0-9-]+\.oci\.oraclecloud\.com/[a-z0-9]+/[a-z0-9._/-]+$ ]]
+          [[ "$OCI_COMPARTMENT_OCID" == ocid1.compartment.* ]]
+          [[ "$OCI_INSTANCE_OCID" == ocid1.instance.* ]]
+          [[ "$HEALTHCHECK_URL" =~ ^https?:// ]]
+
+      - name: Build immutable image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="$OCIR_REPOSITORY_URL:$GITHUB_SHA"
+          docker build --pull --file "$DOCKERFILE" --tag "$image" "$BUILD_CONTEXT"
+          printf 'IMAGE_URI=%s\n' "$image" >> "$GITHUB_ENV"
+
+      - name: Scan image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy:0.67.2 image \
+            --exit-code 1 \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            "$IMAGE_URI"
+
+      - name: Push SHA image
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The dedicated runner authenticates to OCIR with Instance Principal.
+          docker push "$IMAGE_URI"
+
+      - name: Push optional version alias
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.version != '' }}
+        env:
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ ]]
+          version_image="$OCIR_REPOSITORY_URL:$VERSION"
+          docker tag "$IMAGE_URI" "$version_image"
+          docker push "$version_image"
+
+      - name: Request restricted deployment
+        id: deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf -v remote_script \
+            '#!/usr/bin/env bash\nexec sudo -- /usr/local/sbin/deploy-compose-app %q %q\n' \
+            "$APP_NAME" "$GITHUB_SHA"
+
+          jq -n --arg text "$remote_script" \
+            '{source:{sourceType:"TEXT",text:$text},output:{outputType:"TEXT"}}' \
+            > content.json
+          jq -n --arg instance_id "$OCI_INSTANCE_OCID" \
+            '{instanceId:$instance_id}' \
+            > target.json
+
+          command_id=$(oci instance-agent command create \
+            --auth instance_principal \
+            --compartment-id "$OCI_COMPARTMENT_OCID" \
+            --content file://content.json \
+            --target file://target.json \
+            --timeout-in-seconds 1800 \
+            --query data.id \
+            --raw-output)
+
+          printf 'command_id=%s\n' "$command_id" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for deployment
+        env:
+          COMMAND_ID: ${{ steps.deploy.outputs.command_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 120); do
+            state=$(oci instance-agent command-execution get \
+              --auth instance_principal \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$OCI_INSTANCE_OCID" \
+              --query 'data."lifecycle-state"' \
+              --raw-output 2>/dev/null || true)
+
+            case "$state" in
+              SUCCEEDED)
+                oci instance-agent command-execution get \
+                  --auth instance_principal \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$OCI_INSTANCE_OCID" \
+                  --query 'data.content.text' \
+                  --raw-output
+                exit 0
+                ;;
+              FAILED|TIMED_OUT|CANCELED)
+                echo "Deployment failed with state: $state" >&2
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "Timed out waiting for OCI Run Command" >&2
+          exit 1
+
+      - name: Verify public health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error \
+            --retry 12 --retry-all-errors --retry-delay 5 \
+            "$HEALTHCHECK_URL" >/dev/null

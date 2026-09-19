@@ -132,6 +132,11 @@ output "registry_repository_count" {
   value       = length(oci_artifacts_container_repository.platform)
 }
 
+output "registry_immutable" {
+  description = "Indica si los repositorios OCIR impiden sobrescribir imagenes existentes"
+  value       = var.registry_immutable
+}
+
 output "registry_repository_names" {
   description = "Nombres de los repositorios OCIR creados"
   value       = sort(keys(oci_artifacts_container_repository.platform))
@@ -142,6 +147,30 @@ output "registry_repository_urls" {
   value = {
     for name, repository in oci_artifacts_container_repository.platform :
     name => "${local.registry_domain}/${repository.namespace}/${repository.display_name}"
+  }
+}
+
+output "deployment_enabled" {
+  description = "Indica si la base de CI/CD de aplicaciones esta habilitada"
+  value       = var.deployment_enabled
+}
+
+output "deployment_status" {
+  description = "Estado logico de la base de CI/CD de aplicaciones"
+  value       = var.deployment_enabled ? "ENABLED" : "DISABLED"
+}
+
+output "deployment_principal_policy_ids" {
+  description = "OCIDs de las policies de deployment, indexados por dominio de confianza"
+  value = {
+    for name, policy in oci_identity_policy.deployment_principal : name => policy.id
+  }
+}
+
+output "deployment_authorized_repositories" {
+  description = "Repositorios OCIR autorizados para cada dominio de confianza"
+  value = {
+    for name, principal in var.deployment_principals : name => sort(tolist(principal.repository_names))
   }
 }
 

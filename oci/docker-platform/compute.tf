@@ -69,6 +69,8 @@ resource "oci_core_instance" "server" {
               }
             )
           )
+          deployment_enabled     = var.deployment_enabled
+          deployment_wrapper_b64 = base64encode(file("${path.module}/cloud-init/deploy-compose-app.py"))
         }
       )
     )

@@ -1,0 +1,7 @@
+{
+  "allowed_images": [],
+  "compose_file": "compose.yaml",
+  "health_url": "https://app.example.com/health",
+  "repository": "ocir.sa-saopaulo-1.oci.oraclecloud.com/namespace/platform/service",
+  "service": "app"
+}

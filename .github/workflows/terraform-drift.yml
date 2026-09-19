@@ -1,0 +1,179 @@
+name: Terraform Drift Detection
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-drift-oci-docker-platform
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_LOG: ""
+
+jobs:
+  drift:
+    name: Drift - ${{ matrix.architecture.name }}
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.DRIFT_DETECTION_ENABLED == 'true' }}
+    runs-on: ${{ vars.OCI_TERRAFORM_RUNNER_LABEL || 'oci-terraform' }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        architecture:
+          - name: OCI Docker Platform
+            working_directory: oci/docker-platform
+            backend_config: /etc/terraform/oci/docker-platform/backend.oci.tfbackend
+            var_file: /etc/terraform/oci/docker-platform/terraform.tfvars
+    env:
+      TF_BACKEND_CONFIG_FILE: ${{ matrix.architecture.backend_config }}
+      TF_VAR_FILE: ${{ matrix.architecture.var_file }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.architecture.working_directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          clean: true
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.12.0"
+          terraform_wrapper: false
+
+      - name: Validate protected runner configuration
+        run: |
+          set -euo pipefail
+
+          for config_file in "$TF_BACKEND_CONFIG_FILE" "$TF_VAR_FILE"; do
+            if [[ ! -f "$config_file" || -L "$config_file" ]]; then
+              echo "::error title=Missing protected Terraform configuration::A required runner-local configuration file is missing or is a symbolic link."
+              exit 1
+            fi
+
+            permissions=$(stat -c '%a' "$config_file")
+            if (( (8#$permissions & 0022) != 0 )); then
+              echo "::error title=Unsafe Terraform configuration permissions::Runner-local Terraform configuration must not be group- or world-writable."
+              exit 1
+            fi
+          done
+
+          if ! grep -Eq '^[[:space:]]*auth[[:space:]]*=[[:space:]]*"InstancePrincipal"' "$TF_BACKEND_CONFIG_FILE"; then
+            echo "::error title=Unsupported backend authentication::The backend must use InstancePrincipal on the dedicated OCI runner."
+            exit 1
+          fi
+
+          if ! grep -Eq '^[[:space:]]*oci_auth[[:space:]]*=[[:space:]]*"InstancePrincipal"' "$TF_VAR_FILE"; then
+            echo "::error title=Unsupported provider authentication::The OCI provider must use InstancePrincipal on the dedicated OCI runner."
+            exit 1
+          fi
+
+      - name: Terraform init
+        run: |
+          set -euo pipefail
+          terraform init \
+            -input=false \
+            -no-color \
+            -backend-config="$TF_BACKEND_CONFIG_FILE"
+
+      - name: Terraform validate
+        run: |
+          set -euo pipefail
+          terraform validate -no-color
+
+      - name: Terraform plan for drift
+        id: plan
+        run: |
+          set -euo pipefail
+
+          plan_log=$(mktemp "$RUNNER_TEMP/terraform-drift.XXXXXX.log")
+          chmod 600 "$plan_log"
+          trap 'rm -f "$plan_log"' EXIT
+
+          set +e
+          terraform plan \
+            -detailed-exitcode \
+            -input=false \
+            -no-color \
+            -lock-timeout=5m \
+            -refresh=true \
+            -var-file="$TF_VAR_FILE" \
+            >"$plan_log" 2>&1
+          plan_exit_code=$?
+          set -e
+
+          case "$plan_exit_code" in
+            0|1|2)
+              ;;
+            *)
+              echo "::error title=Unexpected Terraform exit code::terraform plan returned an unsupported exit code."
+              plan_exit_code=1
+              ;;
+          esac
+
+          printf 'exitcode=%s\n' "$plan_exit_code" >> "$GITHUB_OUTPUT"
+
+      - name: Publish drift summary
+        if: ${{ always() }}
+        env:
+          ARCHITECTURE_NAME: ${{ matrix.architecture.name }}
+          WORKING_DIRECTORY: ${{ matrix.architecture.working_directory }}
+          PLAN_EXIT_CODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          set -euo pipefail
+
+          case "$PLAN_EXIT_CODE" in
+            0)
+              result="PASS - no differences detected"
+              ;;
+            1)
+              result="ERROR - Terraform could not complete the plan"
+              ;;
+            2)
+              result="DRIFT - Terraform detected pending changes"
+              ;;
+            *)
+              result="ERROR - drift plan was not executed"
+              ;;
+          esac
+
+          {
+            echo "## Terraform drift detection"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Architecture | $ARCHITECTURE_NAME |"
+            echo "| Directory | \`$WORKING_DIRECTORY\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+            echo "| Checked at | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |"
+            echo "| Terraform exit code | \`${PLAN_EXIT_CODE:-not available}\` |"
+            echo "| Result | $result |"
+            echo
+            echo "The Terraform plan output, variable files and remote state are not published by this workflow."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce drift result
+        if: ${{ always() && steps.plan.outputs.exitcode != '' && steps.plan.outputs.exitcode != '0' }}
+        env:
+          PLAN_EXIT_CODE: ${{ steps.plan.outputs.exitcode }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$PLAN_EXIT_CODE" == "2" ]]; then
+            echo "::warning title=Terraform drift detected::The versioned configuration and deployed infrastructure differ. Review the run summary and execute a protected local plan before remediation."
+            exit 2
+          fi
+
+          echo "::error title=Terraform drift check failed::Terraform could not complete the drift plan. Review runner health, authentication, backend access and OCI permissions."
+          exit 1

@@ -365,10 +365,65 @@ variable "registry_visibility" {
   }
 }
 
+variable "registry_immutable" {
+  description = "Control opcional de inmutabilidad OCIR; null preserva la configuracion existente"
+  type        = bool
+  default     = null
+}
+
 variable "registry_freeform_tags" {
   description = "Tags libres adicionales aplicados a todos los repositorios OCIR"
   type        = map(string)
   default     = {}
+}
+
+variable "deployment_enabled" {
+  description = "Prepara IAM y cloud-init para deployments restringidos mediante OCI Run Command"
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.deployment_enabled || (var.registry_enabled && var.registry_immutable == true)
+    error_message = "registry_enabled y registry_immutable deben ser true cuando deployment_enabled es true."
+  }
+}
+
+variable "deployment_principals" {
+  description = "Principales IAM existentes y repositorios exactos que cada uno puede publicar"
+  type = map(object({
+    principal_type   = string
+    principal_name   = string
+    repository_names = set(string)
+  }))
+  default = {}
+
+  validation {
+    condition = alltrue([
+      for principal in values(var.deployment_principals) :
+      contains(["group", "dynamic-group"], principal.principal_type)
+    ])
+    error_message = "principal_type debe ser group o dynamic-group."
+  }
+
+  validation {
+    condition = alltrue([
+      for key, principal in var.deployment_principals :
+      can(regex("^[a-z0-9][a-z0-9-]{0,31}$", key)) &&
+      can(regex("^[A-Za-z0-9_-]+$", principal.principal_name)) &&
+      length(principal.repository_names) > 0
+    ])
+    error_message = "Cada principal necesita una clave simple, un nombre IAM valido y al menos un repositorio."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for principal in values(var.deployment_principals) : [
+        for repository_name in principal.repository_names :
+        contains(var.registry_repository_names, repository_name)
+      ]
+    ]))
+    error_message = "Todos los repositorios autorizados deben existir en registry_repository_names."
+  }
 }
 
 variable "monitoring_enabled" {
