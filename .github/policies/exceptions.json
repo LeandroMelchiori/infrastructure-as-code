@@ -1,0 +1,13 @@
+{
+  "exceptions": [
+    {
+      "rule_id": "CKV2_IAC_OCI_2",
+      "path": "oci/docker-platform/security.tf",
+      "resource": "oci_core_network_security_group_security_rule.ssh",
+      "owner": "platform",
+      "reason": "Compatibilidad temporal con el valor por defecto historico de laboratorio; los entornos reales deben restringir ssh_source_cidr.",
+      "expires_on": "2027-03-31"
+    }
+  ]
+}
+

@@ -1,0 +1,48 @@
+name: Terraform Policy as Code
+
+on:
+  pull_request:
+    paths:
+      - ".github/policies/**"
+      - ".github/workflows/terraform-policy.yml"
+      - "oci/docker-platform/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CHECKOV_VERSION: "3.3.8"
+  POLICY_TARGET: oci/docker-platform
+
+jobs:
+  policy:
+    name: OCI Docker Platform
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install Checkov
+        run: |
+          set -euo pipefail
+          python3 -m pip install \
+            --disable-pip-version-check \
+            --no-cache-dir \
+            "checkov==${CHECKOV_VERSION}"
+
+      - name: Run security and architecture policies
+        run: |
+          set -euo pipefail
+          python3 .github/policies/run_policy_checks.py \
+            --directory "$POLICY_TARGET" \
+            --exceptions .github/policies/exceptions.json
+

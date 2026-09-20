@@ -1563,6 +1563,101 @@ dupliques la lógica de inicialización, plan o clasificación.
 
 ---
 
+## Policy as Code
+
+El workflow `.github/workflows/terraform-policy.yml` analiza los cambios de
+`oci/docker-platform` en cada pull request y también admite ejecución manual con
+`workflow_dispatch`. Usa Checkov fijado a una versión concreta y políticas
+locales versionadas en `.github/policies`.
+
+Este control es estático: no consulta OCI, no inicializa el backend y no lee
+`terraform.tfvars`, planes ni state. Por ese motivo no necesita credenciales ni
+secretos de GitHub. Sus permisos se limitan a `contents: read` y nunca ejecuta
+`terraform apply`.
+
+El análisis se divide en dos niveles:
+
+| Nivel | Comportamiento | Controles principales |
+| --- | --- | --- |
+| Bloqueo | Falla el job y debe corregirse o exceptuarse | SSH público, buckets públicos, IAM administrativo sin restricciones, ingress total, secretos hardcodeados e imágenes `latest` o sin tag |
+| Advertencia | Aparece en el resumen sin bloquear | Recursos principales sin tags, egress amplio, grants `manage` que requieren revisión y el resto del baseline OCI de Checkov |
+
+Checkov aporta de forma nativa, entre otros, `CKV_OCI_1` para claves privadas en
+el provider y `CKV_OCI_10` para Object Storage público. El scanner de secretos
+de Checkov se ejecuta por separado para que una credencial detectada siempre sea
+un error.
+
+Los checks nativos de SSH `CKV_OCI_19` y `CKV_OCI_22` se excluyen de la
+decisión: el primero produce falsos positivos en security lists sin ingress y el
+segundo duplicaría el control local. La política personalizada verifica las reglas
+reales de NSG y security lists, por lo que SSH público continúa siendo bloqueante.
+
+Las políticas personalizadas completan los casos que el baseline no interpreta
+de forma suficiente:
+
+- `CKV2_IAC_OCI_1`: bloquea `any-user`, `manage/use all-resources` y grants
+  `manage` a nivel tenancy sin condición.
+- `CKV2_IAC_OCI_2`: bloquea ingress público para todos los protocolos.
+- `CKV2_IAC_OCI_101`: advierte cuando un recurso OCI principal y taggeable no
+  define `freeform_tags` o `defined_tags`.
+- `CKV2_IAC_OCI_102`: advierte sobre egress de todos los protocolos a Internet.
+- `CKV2_IAC_OCI_103`: advierte sobre grants `manage` de compartment sin una
+  condición adicional.
+- `IAC_DOCKER_001`: bloquea imágenes literales con `:latest` o sin tag en
+  Terraform y plantillas Compose. Las imágenes dinámicas siguen sujetas a las
+  validaciones del wrapper de deployment.
+
+El resumen de GitHub Actions muestra únicamente regla, descripción y ubicación.
+No publica líneas de código, valores, coincidencias de secretos ni resultados
+crudos de Checkov.
+
+### Excepciones documentadas
+
+Las excepciones se registran en `.github/policies/exceptions.json` y deben estar
+acotadas a una regla, ruta y, cuando corresponda, recurso exactos. También deben
+incluir `owner`, una justificación de al menos 20 caracteres y `expires_on` en
+formato `YYYY-MM-DD`. Las excepciones vencidas o mal formadas bloquean el PR; las
+que ya no coinciden con un finding generan una advertencia para poder retirarlas.
+
+Ejemplo:
+
+```json
+{
+  "rule_id": "CKV2_IAC_OCI_2",
+  "path": "oci/docker-platform/security.tf",
+  "resource": "oci_core_network_security_group_security_rule.ssh",
+  "owner": "platform",
+  "reason": "Excepcion temporal asociada a un riesgo aceptado y documentado.",
+  "expires_on": "2027-03-31"
+}
+```
+
+La plantilla conserva una excepción temporal para el valor histórico
+`ssh_source_cidr = "0.0.0.0/0"`. No desactiva la regla globalmente: otro recurso
+SSH público seguirá bloqueando el PR. En despliegues reales configura un CIDR
+administrativo restringido y elimina la excepción.
+
+Los falsos positivos más probables provienen de valores calculados que Checkov
+no puede resolver sin un plan, recursos OCI que no admiten tags, ingress público
+80/443 requerido por Traefik y permisos `manage` cuyo alcance real está limitado
+por condiciones interpoladas. No agregues excepciones silenciosas: revisa el
+resultado, limita el alcance y documenta la decisión con vencimiento.
+
+Para ejecutar localmente el mismo control:
+
+```bash
+python3 -m pip install checkov==3.3.8
+python3 .github/policies/run_policy_checks.py \
+  --directory oci/docker-platform \
+  --exceptions .github/policies/exceptions.json
+```
+
+Al incorporar otra arquitectura, agrega su ruta al filtro del workflow y crea un
+job o matriz que invoque el mismo ejecutor con excepciones específicas. Evita
+convertir excepciones de una arquitectura en exclusiones globales.
+
+---
+
 ## Validación de la plantilla
 
 La configuración fue validada utilizando:
