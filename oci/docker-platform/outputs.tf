@@ -40,22 +40,22 @@ output "object_storage_namespace" {
 
 output "media_bucket_name" {
   description = "Nombre del bucket utilizado para imágenes y archivos"
-  value       = oci_objectstorage_bucket.media.name
+  value       = module.storage.media_bucket_name
 }
 
 output "media_bucket_access_type" {
   description = "Tipo de acceso configurado para el bucket"
-  value       = oci_objectstorage_bucket.media.access_type
+  value       = module.storage.media_bucket_access_type
 }
 
 output "media_bucket_versioning" {
   description = "Estado del versionado del bucket media"
-  value       = oci_objectstorage_bucket.media.versioning
+  value       = module.storage.media_bucket_versioning
 }
 
 output "object_storage_lifecycle_policy_id" {
   description = "ID de la política lifecycle del bucket media, o null si está deshabilitada"
-  value       = try(oci_objectstorage_object_lifecycle_policy.media[0].id, null)
+  value       = module.storage.object_storage_lifecycle_policy_id
 }
 
 output "backup_enabled" {

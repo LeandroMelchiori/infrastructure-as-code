@@ -32,3 +32,13 @@ moved {
   from = oci_core_volume_backup_policy_assignment.boot
   to   = module.backup.oci_core_volume_backup_policy_assignment.boot
 }
+
+moved {
+  from = oci_objectstorage_bucket.media
+  to   = module.storage.oci_objectstorage_bucket.media
+}
+
+moved {
+  from = oci_objectstorage_object_lifecycle_policy.media
+  to   = module.storage.oci_objectstorage_object_lifecycle_policy.media
+}

@@ -17,8 +17,8 @@ resource "oci_identity_policy" "server_secrets" {
   statements = [
     "Allow dynamic-group ${oci_identity_dynamic_group.server.name} to read secret-bundles in compartment ${var.compartment_name}",
 
-    "Allow dynamic-group ${oci_identity_dynamic_group.server.name} to read buckets in compartment ${var.compartment_name} where target.bucket.name = '${local.media_bucket_name}'",
+    "Allow dynamic-group ${oci_identity_dynamic_group.server.name} to read buckets in compartment ${var.compartment_name} where target.bucket.name = '${module.storage.media_bucket_name}'",
 
-    "Allow dynamic-group ${oci_identity_dynamic_group.server.name} to manage objects in compartment ${var.compartment_name} where target.bucket.name = '${local.media_bucket_name}'"
+    "Allow dynamic-group ${oci_identity_dynamic_group.server.name} to manage objects in compartment ${var.compartment_name} where target.bucket.name = '${module.storage.media_bucket_name}'"
   ]
 }

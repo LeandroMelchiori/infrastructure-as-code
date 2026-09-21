@@ -1953,7 +1953,10 @@ La prueba completa de creación y destrucción de una infraestructura descartabl
 
 ## OCI Object Storage
 
-La plataforma incluye un bucket de OCI Object Storage preparado para almacenar archivos asociados a las aplicaciones desplegadas.
+La plataforma incluye un bucket de OCI Object Storage preparado para almacenar
+archivos asociados a las aplicaciones desplegadas. El bucket y su lifecycle
+policy opcional viven en el módulo local `oci/modules/storage`; el namespace
+compartido y las políticas IAM permanecen en el root.
 
 Puede utilizarse para:
 
