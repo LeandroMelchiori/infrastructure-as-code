@@ -11,9 +11,9 @@ La infraestructura está diseñada para ser independiente de las aplicaciones. S
 Esta arquitectura permite ejecutar:
 
 ```bash
-terraform init -backend-config=backend.oci.tfbackend
-terraform plan
-terraform apply
+terraform init -reconfigure -backend-config=environments/dev/backend.oci.tfbackend
+terraform plan -var-file=environments/dev/terraform.tfvars
+terraform apply -var-file=environments/dev/terraform.tfvars
 ```
 
 y obtener una plataforma OCI configurada con:
@@ -636,7 +636,7 @@ cpu_alarm_pending_duration_minutes = 5
 cpu_alarm_severity                 = "WARNING"
 ```
 
-El endpoint se define únicamente en `terraform.tfvars`, que está ignorado por
+El endpoint se define únicamente en el `terraform.tfvars` local del entorno, que está ignorado por
 Git, y la variable está marcada como sensible para ocultarla en la salida de
 Terraform. El valor seguirá formando parte del state remoto, por lo que el bucket
 de state debe permanecer privado. Para evitar cambios sobre instalaciones
@@ -923,8 +923,8 @@ docker-platform/
 │
 ├── README.md
 ├── backup.tf
-├── backend.oci.tfbackend.example
 ├── compute.tf
+├── environment.tf
 ├── deployment.tf
 ├── iam.tf
 ├── locals.tf
@@ -938,9 +938,18 @@ docker-platform/
 ├── variables.tf
 ├── vault.tf
 ├── versions.tf
-├── terraform.tfvars.example
 ├── .terraform.lock.hcl
 │
+├── environments/
+│   ├── dev/
+│   │   ├── backend.oci.tfbackend.example
+│   │   └── terraform.tfvars.example
+│   ├── staging/
+│   │   ├── backend.oci.tfbackend.example
+│   │   └── terraform.tfvars.example
+│   └── prod/
+│       ├── backend.oci.tfbackend.example
+│       └── terraform.tfvars.example
 ├── cloud-init/
 │   ├── bootstrap.yaml.tftpl
 │   ├── deploy-compose-app.py
@@ -967,6 +976,7 @@ La infraestructura permite configurar:
 tenancy_ocid
 compartment_ocid
 compartment_name
+environment_name
 project_name
 region
 oci_auth
@@ -1018,12 +1028,147 @@ cpu_alarm_severity
 
 ---
 
+## Entornos independientes
+
+La plataforma utiliza un único código Terraform y tres configuraciones
+independientes: `dev`, `staging` y `prod`. No usa Terraform Workspaces como
+mecanismo principal y no existe un entorno por defecto. Cada comando que cargue
+variables o backend debe indicar el entorno de forma explícita.
+
+```text
+environments/
+├── dev/
+│   ├── backend.oci.tfbackend.example
+│   └── terraform.tfvars.example
+├── staging/
+│   ├── backend.oci.tfbackend.example
+│   └── terraform.tfvars.example
+└── prod/
+    ├── backend.oci.tfbackend.example
+    └── terraform.tfvars.example
+```
+
+Los tres backends pueden usar el bucket privado y dedicado de Terraform State,
+pero deben usar claves distintas:
+
+| Entorno | Remote state key |
+| --- | --- |
+| `dev` | `docker-platform/dev/terraform.tfstate` |
+| `staging` | `docker-platform/staging/terraform.tfstate` |
+| `prod` | `docker-platform/prod/terraform.tfstate` |
+
+Compartir bucket no equivale a compartir state: la separación se realiza por
+clave y por archivo de backend. Para mayor aislamiento administrativo, prod
+puede usar otro bucket dedicado, conservando la misma clave relativa. Nunca uses
+el bucket media ni copies un state entre entornos.
+
+### Preparar un entorno
+
+Elige el entorno antes de copiar archivos. Este ejemplo prepara dev:
+
+```bash
+cp environments/dev/terraform.tfvars.example \
+  environments/dev/terraform.tfvars
+cp environments/dev/backend.oci.tfbackend.example \
+  environments/dev/backend.oci.tfbackend
+```
+
+Los archivos reales están ignorados por Git en cualquier subdirectorio. Revisa
+que `environment_name`, compartment, CIDRs, nombres, capacidad y backend
+correspondan al mismo entorno antes de inicializar.
+
+DEV:
+
+```bash
+terraform init \
+  -backend-config=environments/dev/backend.oci.tfbackend \
+  -reconfigure
+terraform plan \
+  -var-file=environments/dev/terraform.tfvars
+```
+
+STAGING:
+
+```bash
+terraform init \
+  -backend-config=environments/staging/backend.oci.tfbackend \
+  -reconfigure
+terraform plan \
+  -var-file=environments/staging/terraform.tfvars
+```
+
+PROD:
+
+```bash
+terraform init \
+  -backend-config=environments/prod/backend.oci.tfbackend \
+  -reconfigure
+terraform plan \
+  -var-file=environments/prod/terraform.tfvars
+```
+
+`-reconfigure` es obligatorio al cambiar de entorno en el mismo checkout. Una
+alternativa más segura es usar un checkout o worktree distinto por entorno. No
+ejecutes prod desde un directorio que acaba de utilizar otro backend sin volver a
+inicializarlo y comprobar la línea `key`.
+
+### Controles por entorno
+
+- DEV prioriza bajo costo. Monitoring, logging, backups y registry pueden estar
+  desactivados; SSH público produce una advertencia visible.
+- STAGING debe parecerse a prod. SSH público se bloquea y los controles
+  operativos desactivados generan advertencias de Policy as Code.
+- PROD bloquea SSH público y exige monitoring, logging, backups, registry privado
+  e inmutable y Object Storage privado con versionado.
+
+`environment_name` es obligatorio y no tiene valor por defecto. Terraform valida
+los controles mínimos de prod antes de planificar. Policy as Code valida además
+los ejemplos y la clave exacta del backend sin publicar sus valores.
+
+### Workflows y producción
+
+- `terraform-ci.yml` valida los tres ejemplos en pull requests sin acceder a OCI.
+  Una ejecución manual exige elegir un entorno.
+- `terraform-policy.yml` aplica el perfil correspondiente a dev, staging o prod.
+  En pull requests ejecuta los tres perfiles; manualmente exige selección.
+- `terraform-drift.yml` usa archivos root-owned separados en el runner bajo
+  `/etc/terraform/oci/docker-platform/<environment>/`. Manualmente exige elegir
+  entorno; el schedule recorre la matriz solo cuando
+  `DRIFT_DETECTION_ENABLED == "true"`.
+
+Configura en GitHub los Environments `infrastructure-dev`,
+`infrastructure-staging` e `infrastructure-prod`. Para prod aplica required
+reviewers, restringe las ramas autorizadas y limita el runner y su Instance
+Principal. Las reglas de protección viven en GitHub y no se versionan en este
+repositorio. Protege además la rama principal y exige Terraform CI y Policy as
+Code como checks requeridos.
+
+### Adoptar un state existente
+
+No inicialices los tres backends contra el state actual. Primero identifica qué
+entorno representa la infraestructura desplegada y detén cualquier ejecución
+concurrente. Después crea únicamente los archivos reales de ese entorno y migra:
+
+```bash
+terraform init \
+  -migrate-state \
+  -backend-config=environments/ENTORNO/backend.oci.tfbackend
+```
+
+Confirma el origen y destino mostrados por Terraform y ejecuta un plan con el
+`terraform.tfvars` del mismo entorno. Crear los otros backends produce states
+vacíos para infraestructuras nuevas; no copies el state migrado. Cambiar
+`project_name`, CIDRs, compartments o nombres durante esta adopción puede forzar
+reemplazos y debe revisarse en una operación posterior y separada.
+
+---
+
 ## Configuración
 
 Crear el archivo local de variables:
 
 ```bash
-cp terraform.tfvars.example terraform.tfvars
+cp environments/dev/terraform.tfvars.example environments/dev/terraform.tfvars
 ```
 
 Ejemplo:
@@ -1033,7 +1178,8 @@ tenancy_ocid     = "ocid1.tenancy..."
 compartment_ocid = "ocid1.compartment..."
 compartment_name = "mi-compartment"
 
-project_name = "mi-proyecto"
+environment_name = "dev"
+project_name     = "mi-proyecto-dev"
 
 region                  = "sa-saopaulo-1"
 oci_auth                = "InstancePrincipal"
@@ -1067,7 +1213,7 @@ monitoring_enabled = false
 El archivo:
 
 ```text
-terraform.tfvars
+environments/<environment>/terraform.tfvars
 ```
 
 no debe almacenarse en Git.
@@ -1083,24 +1229,25 @@ Esta arquitectura utiliza el backend nativo de OCI, disponible desde Terraform
 Crea la configuración local del backend:
 
 ```bash
-cp backend.oci.tfbackend.example backend.oci.tfbackend
+cp environments/dev/backend.oci.tfbackend.example environments/dev/backend.oci.tfbackend
 ```
 
 Reemplaza `bucket` y `namespace` con los outputs del bootstrap. Conserva la clave
 exclusiva:
 
 ```hcl
-key = "docker-platform/terraform.tfstate"
+key = "docker-platform/dev/terraform.tfstate"
 ```
 
-`backend.oci.tfbackend` está ignorado por Git. No agregues allí claves privadas,
-tokens ni contraseñas. Terraform carga el backend antes que las variables, por lo
-que esta configuración no pertenece a `terraform.tfvars`.
+`environments/<environment>/backend.oci.tfbackend` está ignorado por Git. No
+agregues allí claves privadas, tokens ni contraseñas. Terraform carga el backend
+antes que las variables, por lo que esta configuración no pertenece al
+`terraform.tfvars` del entorno.
 
 Inicializa Terraform:
 
 ```bash
-terraform init -backend-config=backend.oci.tfbackend
+terraform init -backend-config=environments/dev/backend.oci.tfbackend
 ```
 
 ---
@@ -1122,14 +1269,14 @@ crea un perfil temporal:
 oci session authenticate --profile-name TERRAFORM
 ```
 
-Configura `terraform.tfvars`:
+Configura `environments/dev/terraform.tfvars`:
 
 ```hcl
 oci_auth                = "SecurityToken"
 oci_config_file_profile = "TERRAFORM"
 ```
 
-Y agrega localmente a `backend.oci.tfbackend`:
+Y agrega localmente a `environments/dev/backend.oci.tfbackend`:
 
 ```hcl
 auth                = "SecurityToken"
@@ -1160,7 +1307,7 @@ terraform validate
 ## Revisar el plan
 
 ```bash
-terraform plan
+terraform plan -var-file=environments/dev/terraform.tfvars
 ```
 
 Siempre se recomienda revisar el plan antes de ejecutar cambios sobre infraestructura real.
@@ -1170,7 +1317,7 @@ Siempre se recomienda revisar el plan antes de ejecutar cambios sobre infraestru
 ## Crear la infraestructura
 
 ```bash
-terraform apply
+terraform apply -var-file=environments/dev/terraform.tfvars
 ```
 
 Terraform solicitará confirmación antes de realizar los cambios.
@@ -1391,13 +1538,9 @@ terraform.tfvars
 *.key
 ```
 
-El archivo:
-
-```text
-terraform.tfvars.example
-```
-
-sí forma parte del repositorio porque documenta la configuración necesaria.
+Los archivos `environments/*/terraform.tfvars.example` y
+`environments/*/backend.oci.tfbackend.example` sí forman parte del repositorio
+porque documentan la configuración necesaria sin contener valores reales.
 
 ---
 
@@ -1410,8 +1553,9 @@ lo que evita operaciones concurrentes sobre la misma clave.
 Cada arquitectura debe usar una clave distinta:
 
 ```text
-docker-platform/terraform.tfstate
-otra-arquitectura/terraform.tfstate
+docker-platform/dev/terraform.tfstate
+docker-platform/staging/terraform.tfstate
+docker-platform/prod/terraform.tfstate
 ```
 
 La identidad que ejecuta Terraform necesita permisos `OBJECT_INSPECT`,
@@ -1423,12 +1567,13 @@ concedas esos permisos al Dynamic Group del servidor Docker.
 1. Detén ejecuciones concurrentes de Terraform.
 2. Crea el bucket con `oci/terraform-state` y configura los permisos IAM.
 3. Realiza una copia segura de `terraform.tfstate` fuera del repositorio.
-4. Crea `backend.oci.tfbackend` desde el ejemplo y verifica especialmente
-   `bucket`, `namespace`, `region` y `key`.
+4. Elige un único entorno y crea su archivo
+   `environments/ENTORNO/backend.oci.tfbackend` desde el ejemplo. Verifica
+   especialmente `bucket`, `namespace`, `region` y `key`.
 5. Ejecuta:
 
 ```bash
-terraform init -migrate-state -backend-config=backend.oci.tfbackend
+terraform init -migrate-state -backend-config=environments/ENTORNO/backend.oci.tfbackend
 ```
 
 Terraform solicitará confirmación antes de copiar el state local. Después de la
@@ -1436,7 +1581,7 @@ migración:
 
 ```bash
 terraform state list
-terraform plan
+terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
 El plan esperado no debe proponer cambios por el solo hecho de mover el state.
@@ -1451,7 +1596,7 @@ El workflow [`.github/workflows/terraform-drift.yml`](../../.github/workflows/te
 compara periódicamente la configuración Terraform versionada con la
 infraestructura que OCI devuelve al refrescar el state remoto. Se puede ejecutar:
 
-- manualmente desde **Actions > Terraform Drift Detection > Run workflow**;
+- manualmente desde **Actions > Terraform Drift Detection > Run workflow**, seleccionando obligatoriamente dev, staging o prod;
 - automáticamente cada lunes a las `06:17 UTC`, solamente cuando la variable de
   repositorio `DRIFT_DETECTION_ENABLED` tiene el valor exacto `true`.
 
@@ -1490,8 +1635,8 @@ runtime Node.js 24 utilizado por `hashicorp/setup-terraform` v4.
 El runner debe mantener fuera del checkout estos archivos protegidos:
 
 ```text
-/etc/terraform/oci/docker-platform/backend.oci.tfbackend
-/etc/terraform/oci/docker-platform/terraform.tfvars
+/etc/terraform/oci/docker-platform/<environment>/backend.oci.tfbackend
+/etc/terraform/oci/docker-platform/<environment>/terraform.tfvars
 ```
 
 Ambos deben ser archivos regulares, no symlinks, y no pueden ser escribibles por
@@ -1505,7 +1650,8 @@ auth = "InstancePrincipal"
 El segundo contiene los valores reales de la arquitectura y configura:
 
 ```hcl
-oci_auth = "InstancePrincipal"
+environment_name = "dev|staging|prod"
+oci_auth         = "InstancePrincipal"
 ```
 
 El `ssh_public_key_path` utilizado por Terraform debe apuntar a una clave pública
@@ -1556,10 +1702,10 @@ El workflow nunca ejecuta `terraform apply` y no crea Issues automáticamente. S
 se incorpora esa capacidad en el futuro, debe evitar duplicados, usar permisos
 `issues: write` únicamente y no incluir el contenido del plan.
 
-La implementación usa una matriz con una sola entrada para
-`oci/docker-platform`. Para incorporar otra arquitectura, agrega una entrada con
-su directorio de trabajo y las rutas protegidas de backend y variables; no
-dupliques la lógica de inicialización, plan o clasificación.
+La implementación usa una matriz explícita para `dev`, `staging` y `prod`. Cada
+entrada tiene backend, variables, GitHub Environment y grupo de concurrencia
+independientes. Para incorporar otra arquitectura, agrega sus entradas sin
+reutilizar rutas protegidas ni claves de state.
 
 ---
 
@@ -1597,7 +1743,7 @@ de forma suficiente:
 
 - `CKV2_IAC_OCI_1`: bloquea `any-user`, `manage/use all-resources` y grants
   `manage` a nivel tenancy sin condición.
-- `CKV2_IAC_OCI_2`: bloquea ingress público para todos los protocolos.
+- `CKV2_IAC_OCI_2`: bloquea SSH e ingress público para todos los protocolos.
 - `CKV2_IAC_OCI_101`: advierte cuando un recurso OCI principal y taggeable no
   define `freeform_tags` o `defined_tags`.
 - `CKV2_IAC_OCI_102`: advierte sobre egress de todos los protocolos a Internet.
@@ -1606,6 +1752,12 @@ de forma suficiente:
 - `IAC_DOCKER_001`: bloquea imágenes literales con `:latest` o sin tag en
   Terraform y plantillas Compose. Las imágenes dinámicas siguen sujetas a las
   validaciones del wrapper de deployment.
+- `IAC_ENV_001`: bloquea archivos o claves de state que no coincidan con el
+  entorno seleccionado.
+- `IAC_ENV_002`: bloquea SSH público en staging y prod.
+- `IAC_ENV_003`: bloquea controles obligatorios desactivados en prod.
+- `IAC_ENV_101`: advierte si staging se aleja de los controles de prod.
+- `IAC_ENV_102`: reporta SSH público como warning únicamente en dev.
 
 El resumen de GitHub Actions muestra únicamente regla, descripción y ubicación.
 No publica líneas de código, valores, coincidencias de secretos ni resultados
@@ -1649,7 +1801,8 @@ Para ejecutar localmente el mismo control:
 python3 -m pip install checkov==3.3.8
 python3 .github/policies/run_policy_checks.py \
   --directory oci/docker-platform \
-  --exceptions .github/policies/exceptions.json
+  --exceptions .github/policies/exceptions.json \
+  --environment dev
 ```
 
 Al incorporar otra arquitectura, agrega su ruta al filtro del workflow y crea un
@@ -1663,9 +1816,10 @@ convertir excepciones de una arquitectura en exclusiones globales.
 La configuración fue validada utilizando:
 
 ```bash
-terraform init
+terraform init -reconfigure \
+  -backend-config=environments/ENTORNO/backend.oci.tfbackend
 terraform validate
-terraform plan
+terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
 Con `monitoring_enabled = false`, la cantidad base histórica para una

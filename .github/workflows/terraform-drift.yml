@@ -2,15 +2,20 @@ name: Terraform Drift Detection
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment whose remote state will be checked
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
   schedule:
     - cron: "17 6 * * 1"
 
 permissions:
   contents: read
-
-concurrency:
-  group: terraform-drift-oci-docker-platform
-  cancel-in-progress: false
 
 env:
   TF_IN_AUTOMATION: "true"
@@ -19,25 +24,27 @@ env:
 
 jobs:
   drift:
-    name: Drift - ${{ matrix.architecture.name }}
+    name: Drift - OCI Docker Platform ${{ matrix.environment }}
     if: ${{ github.event_name == 'workflow_dispatch' || vars.DRIFT_DETECTION_ENABLED == 'true' }}
     runs-on: ${{ vars.OCI_TERRAFORM_RUNNER_LABEL || 'oci-terraform' }}
     timeout-minutes: 45
+    environment:
+      name: infrastructure-${{ matrix.environment }}
+    concurrency:
+      group: terraform-drift-oci-docker-platform-${{ matrix.environment }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:
-        architecture:
-          - name: OCI Docker Platform
-            working_directory: oci/docker-platform
-            backend_config: /etc/terraform/oci/docker-platform/backend.oci.tfbackend
-            var_file: /etc/terraform/oci/docker-platform/terraform.tfvars
+        environment: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.environment) || '["dev","staging","prod"]') }}
     env:
-      TF_BACKEND_CONFIG_FILE: ${{ matrix.architecture.backend_config }}
-      TF_VAR_FILE: ${{ matrix.architecture.var_file }}
+      TF_ENVIRONMENT: ${{ matrix.environment }}
+      TF_BACKEND_CONFIG_FILE: /etc/terraform/oci/docker-platform/${{ matrix.environment }}/backend.oci.tfbackend
+      TF_VAR_FILE: /etc/terraform/oci/docker-platform/${{ matrix.environment }}/terraform.tfvars
     defaults:
       run:
         shell: bash
-        working-directory: ${{ matrix.architecture.working_directory }}
+        working-directory: oci/docker-platform
 
     steps:
       - name: Checkout
@@ -79,12 +86,24 @@ jobs:
             exit 1
           fi
 
+          if ! grep -Eq "^[[:space:]]*environment_name[[:space:]]*=[[:space:]]*\"$TF_ENVIRONMENT\"" "$TF_VAR_FILE"; then
+            echo "::error title=Environment mismatch::Runner variables do not match the selected environment."
+            exit 1
+          fi
+
+          expected_key="docker-platform/$TF_ENVIRONMENT/terraform.tfstate"
+          if ! grep -Eq "^[[:space:]]*key[[:space:]]*=[[:space:]]*\"$expected_key\"" "$TF_BACKEND_CONFIG_FILE"; then
+            echo "::error title=Remote state mismatch::Backend key does not match the selected environment."
+            exit 1
+          fi
+
       - name: Terraform init
         run: |
           set -euo pipefail
           terraform init \
             -input=false \
             -no-color \
+            -reconfigure \
             -backend-config="$TF_BACKEND_CONFIG_FILE"
 
       - name: Terraform validate
@@ -127,8 +146,8 @@ jobs:
       - name: Publish drift summary
         if: ${{ always() }}
         env:
-          ARCHITECTURE_NAME: ${{ matrix.architecture.name }}
-          WORKING_DIRECTORY: ${{ matrix.architecture.working_directory }}
+          ARCHITECTURE_NAME: OCI Docker Platform ${{ matrix.environment }}
+          WORKING_DIRECTORY: oci/docker-platform
           PLAN_EXIT_CODE: ${{ steps.plan.outputs.exitcode }}
         run: |
           set -euo pipefail
@@ -154,6 +173,7 @@ jobs:
             echo "| Field | Value |"
             echo "| --- | --- |"
             echo "| Architecture | $ARCHITECTURE_NAME |"
+            echo "| Environment | \`$TF_ENVIRONMENT\` |"
             echo "| Directory | \`$WORKING_DIRECTORY\` |"
             echo "| Commit | \`$GITHUB_SHA\` |"
             echo "| Checked at | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |"

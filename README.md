@@ -47,9 +47,12 @@ infrastructure-as-code/
 │   └── docker-platform/
 │       ├── README.md
 │       ├── *.tf
-│       ├── backend.oci.tfbackend.example
-│       ├── terraform.tfvars.example
+│       ├── environments/
+│       │   ├── dev/
+│       │   ├── staging/
+│       │   └── prod/
 │       ├── cloud-init/
+│       ├── deployment/
 │       └── proxy/
 │
 ├── aws/
@@ -61,10 +64,11 @@ infrastructure-as-code/
 
 ## Terraform State
 
-Cada arquitectura Terraform mantiene su propio state y utiliza una clave de objeto
-exclusiva. El bucket de state se crea por separado mediante
-[`oci/terraform-state`](./oci/terraform-state/) y nunca se reutiliza como bucket de
-archivos de aplicaciones.
+Cada arquitectura Terraform mantiene su propio state. `oci/docker-platform` usa
+una configuración común con backends y claves independientes para `dev`,
+`staging` y `prod`; no usa Workspaces como mecanismo principal. El bucket de
+state se crea por separado mediante [`oci/terraform-state`](./oci/terraform-state/)
+y nunca se reutiliza como bucket de archivos de aplicaciones.
 
 La configuración del backend y las credenciales son locales. Los archivos
 `*.tfbackend`, `terraform.tfvars`, `.terraform/` y `*.tfstate*` están excluidos de

@@ -1,0 +1,52 @@
+# Identidad y selector obligatorio
+environment_name = "dev"
+tenancy_ocid      = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid  = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name  = "REEMPLAZAR_COMPARTMENT_DEV"
+project_name      = "docker-platform-dev"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
+
+# Compute de bajo costo
+ocpus                   = 1
+memory_in_gbs           = 6
+boot_volume_size_in_gbs = 50
+
+# Red aislada de dev
+vcn_cidr           = "10.20.0.0/16"
+public_subnet_cidr = "10.20.1.0/24"
+
+# Solo para laboratorio. Policy as Code lo reporta como warning en dev.
+ssh_public_key_path = "~/.ssh/cloudshellkey.pub"
+ssh_source_cidr     = "0.0.0.0/0"
+
+acme_email = "dev@example.invalid"
+
+# Object Storage privado y sin acciones destructivas
+object_storage_access_type                              = "NoPublicAccess"
+object_storage_versioning                               = false
+object_storage_lifecycle_enabled                        = false
+object_storage_archive_after_days                       = null
+object_storage_delete_previous_versions_after_days      = null
+object_storage_abort_multipart_uploads_after_days       = null
+
+# Capacidades opcionales desactivadas para reducir costo
+backup_enabled  = false
+logging_enabled = false
+
+registry_enabled          = false
+registry_repository_names = []
+registry_visibility       = "PRIVATE"
+registry_immutable        = null
+registry_freeform_tags    = {}
+
+deployment_enabled    = false
+deployment_principals = {}
+
+monitoring_enabled        = false
+notification_endpoint     = null
+notification_protocol     = "EMAIL"
+notification_topic_name   = null
+

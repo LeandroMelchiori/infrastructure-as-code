@@ -1,0 +1,63 @@
+# Identidad y selector obligatorio
+environment_name = "staging"
+tenancy_ocid      = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid  = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name  = "REEMPLAZAR_COMPARTMENT_STAGING"
+project_name      = "docker-platform-staging"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
+
+# Aproxima producción con capacidad moderada
+ocpus                   = 1
+memory_in_gbs           = 6
+boot_volume_size_in_gbs = 50
+
+# Red independiente de staging
+vcn_cidr           = "10.30.0.0/16"
+public_subnet_cidr = "10.30.1.0/24"
+
+# Reemplaza el CIDR de documentación por el origen administrativo real.
+ssh_public_key_path = "~/.ssh/cloudshellkey.pub"
+ssh_source_cidr     = "192.0.2.10/32"
+
+acme_email = "staging@example.invalid"
+
+object_storage_access_type                         = "NoPublicAccess"
+object_storage_versioning                          = true
+object_storage_lifecycle_enabled                   = false
+object_storage_archive_after_days                  = null
+object_storage_delete_previous_versions_after_days = null
+object_storage_abort_multipart_uploads_after_days  = null
+
+backup_enabled        = true
+backup_frequency      = "WEEKLY"
+backup_type           = "INCREMENTAL"
+backup_retention_days = 14
+backup_hour_utc       = 2
+backup_day_of_week    = "SUNDAY"
+
+logging_enabled        = true
+logging_retention_days = 30
+logging_sources        = ["system", "cloud-init", "docker"]
+
+registry_enabled          = true
+registry_repository_names = ["staging/platform/services", "staging/platform/workers"]
+registry_visibility       = "PRIVATE"
+registry_immutable        = true
+registry_freeform_tags = {
+  Environment = "staging"
+}
+
+deployment_enabled    = false
+deployment_principals = {}
+
+monitoring_enabled                 = true
+notification_topic_name            = null
+notification_protocol              = "EMAIL"
+notification_endpoint              = "REEMPLAZAR_ENDPOINT_NOTIFICACION"
+cpu_alarm_threshold_percent        = 85
+cpu_alarm_pending_duration_minutes = 10
+cpu_alarm_severity                 = "WARNING"
+

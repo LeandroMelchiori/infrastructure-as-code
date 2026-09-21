@@ -1,0 +1,63 @@
+# Identidad y selector obligatorio
+environment_name = "prod"
+tenancy_ocid      = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid  = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name  = "REEMPLAZAR_COMPARTMENT_PROD"
+project_name      = "docker-platform-prod"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "InstancePrincipal"
+oci_config_file_profile = "DEFAULT"
+
+# Ajusta capacidad después de revisar límites y costos del tenancy.
+ocpus                   = 2
+memory_in_gbs           = 12
+boot_volume_size_in_gbs = 50
+
+# Red exclusiva de producción
+vcn_cidr           = "10.40.0.0/16"
+public_subnet_cidr = "10.40.1.0/24"
+
+# Reemplaza el CIDR de documentación por el origen administrativo real.
+ssh_public_key_path = "~/.ssh/cloudshellkey.pub"
+ssh_source_cidr     = "192.0.2.10/32"
+
+acme_email = "prod@example.invalid"
+
+object_storage_access_type                         = "NoPublicAccess"
+object_storage_versioning                          = true
+object_storage_lifecycle_enabled                   = false
+object_storage_archive_after_days                  = null
+object_storage_delete_previous_versions_after_days = null
+object_storage_abort_multipart_uploads_after_days  = null
+
+backup_enabled        = true
+backup_frequency      = "DAILY"
+backup_type           = "INCREMENTAL"
+backup_retention_days = 30
+backup_hour_utc       = 2
+
+logging_enabled        = true
+logging_retention_days = 60
+logging_sources        = ["system", "cloud-init", "docker"]
+
+registry_enabled          = true
+registry_repository_names = ["prod/platform/services", "prod/platform/workers"]
+registry_visibility       = "PRIVATE"
+registry_immutable        = true
+registry_freeform_tags = {
+  Environment = "prod"
+}
+
+# La infraestructura queda preparada; los principals se agregan deliberadamente.
+deployment_enabled    = false
+deployment_principals = {}
+
+monitoring_enabled                 = true
+notification_topic_name            = null
+notification_protocol              = "EMAIL"
+notification_endpoint              = "REEMPLAZAR_ENDPOINT_NOTIFICACION"
+cpu_alarm_threshold_percent        = 80
+cpu_alarm_pending_duration_minutes = 5
+cpu_alarm_severity                 = "ERROR"
+

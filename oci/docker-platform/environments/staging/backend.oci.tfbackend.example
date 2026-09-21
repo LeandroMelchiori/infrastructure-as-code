@@ -1,0 +1,15 @@
+# Copia como environments/staging/backend.oci.tfbackend.
+# No agregues credenciales, tokens ni claves privadas.
+
+bucket    = "REEMPLAZAR_BUCKET_TERRAFORM_STATE"
+namespace = "REEMPLAZAR_NAMESPACE"
+key       = "docker-platform/staging/terraform.tfstate"
+region    = "sa-saopaulo-1"
+
+# Runner OCI con Instance Principal:
+# auth = "InstancePrincipal"
+
+# OCI Cloud Shell o sesión local autenticada:
+# auth                = "SecurityToken"
+# config_file_profile = "TERRAFORM"
+

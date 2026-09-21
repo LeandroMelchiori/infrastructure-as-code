@@ -26,8 +26,12 @@ infrastructure-as-code/
     └── docker-platform/
         ├── README.md
         ├── *.tf
-        ├── backend.oci.tfbackend.example
-        ├── terraform.tfvars.example
+        ├── environments/
+        │   ├── dev/
+        │   ├── staging/
+        │   └── prod/
+        │       ├── backend.oci.tfbackend.example
+        │       └── terraform.tfvars.example
         ├── cloud-init/
         │   ├── bootstrap.yaml.tftpl
         │   ├── deploy-compose-app.py
@@ -49,9 +53,9 @@ infrastructure-as-code/
 - Usa nombres derivados de `project_name` cuando agregues recursos nuevos, salvo que exista una variable explícita para permitir override.
 - Aplica `local.common_tags` a recursos OCI nuevos cuando el provider lo soporte.
 - Prefiere variables declaradas en `variables.tf` antes que valores fijos dentro de recursos.
-- Mantén `terraform.tfvars.example` como documentación segura y sin secretos reales.
+- Mantén los archivos `environments/*/*.example` como documentación segura y sin secretos reales.
 - Coloca cada capacidad transversal en un archivo `.tf` propio cuando tenga un ciclo de vida claro (`backup.tf`, `logging.tf`, `registry.tf`, `deployment.tf`).
-- Toda capacidad opcional debe actualizar variables, outputs útiles, `terraform.tfvars.example` y el README del módulo.
+- Toda capacidad opcional debe actualizar variables, outputs útiles, los ejemplos de cada entorno y el README del módulo.
 - Los outputs de recursos opcionales deben devolver mapas vacíos o `null` cuando la función esté deshabilitada, sin evaluar índices inexistentes.
 
 ## Flujo obligatorio de trabajo
@@ -84,11 +88,12 @@ git diff --check
 
 Puede ejecutarse primero `terraform fmt -recursive` para corregir formato, pero la entrega debe incluir un `fmt -check` limpio.
 
-Si existen tanto `backend.oci.tfbackend` como `terraform.tfvars` reales y la autenticación está disponible:
+Si existen el backend y las variables reales de un entorno explícito y la autenticación está disponible:
 
 ```bash
-terraform init -backend-config=backend.oci.tfbackend
-terraform plan
+terraform init -reconfigure \
+  -backend-config=environments/ENTORNO/backend.oci.tfbackend
+terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
 Revisa explícitamente que el plan tenga `0 to destroy`, que no reemplace Compute ni otros recursos inesperadamente y que no incluya secretos. Si no puede ejecutarse el plan real, indícalo; no presentes una revisión estática como confirmación proveniente del state.
@@ -104,11 +109,12 @@ terraform init -backend=false
 terraform validate
 ```
 
-Solo con `backend.oci.tfbackend`, `terraform.tfvars` y autenticación reales:
+Solo con los archivos reales de un entorno nombrado y autenticación disponible:
 
 ```bash
-terraform init -backend-config=backend.oci.tfbackend
-terraform plan
+terraform init -reconfigure \
+  -backend-config=environments/ENTORNO/backend.oci.tfbackend
+terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
 Para el bootstrap del bucket trabaja desde `oci/terraform-state` y utiliza
@@ -143,8 +149,29 @@ Antes de entregar cambios en Terraform:
 - Documenta la migración desde state local mediante `terraform init -migrate-state` y exige detener ejecuciones concurrentes antes de migrar.
 - El bootstrap `oci/terraform-state` conserva state local; trátalo como sensible y mantenlo fuera de Git.
 - No cambies backend y recursos de aplicación en la misma operación sin una razón explícita.
+- `dev`, `staging` y `prod` deben usar claves de state distintas. Nunca copies ni reutilices state entre entornos.
+- No uses Terraform Workspaces como mecanismo principal de separación.
+- `environment_name` es obligatorio y no puede tener un valor por defecto.
+- Todo comando con backend o variables debe nombrar el entorno y usar rutas del mismo directorio.
+- Usa `terraform init -reconfigure` al cambiar de entorno en un checkout; prefiere checkouts separados para operaciones sensibles.
+
+## Entornos y automatización
+
+- Mantén un único conjunto de archivos `.tf`; las diferencias viven en `environments/dev`, `environments/staging` y `environments/prod`.
+- Solo versiona archivos `.example`. Los `terraform.tfvars` y `backend.oci.tfbackend` reales permanecen ignorados en cualquier entorno.
+- DEV prioriza bajo costo y puede desactivar capacidades opcionales. SSH público solo puede tratarse como warning en este perfil.
+- STAGING debe aproximarse a prod. SSH público es bloqueante y los controles operativos desactivados deben generar advertencias visibles.
+- PROD exige monitoring, logging, backups, registry privado e inmutable, Object Storage privado con versionado y SSH restringido.
+- Terraform CI y Policy as Code validan los tres perfiles en pull requests. Las ejecuciones manuales exigen selección explícita.
+- Drift Detection usa rutas root-owned independientes bajo `/etc/terraform/oci/docker-platform/<environment>/` y comprueba que `environment_name` y la clave del backend coincidan.
+- Los workflows que consultan OCI deben usar GitHub Environments separados: `infrastructure-dev`, `infrastructure-staging` e `infrastructure-prod`.
+- Configura required reviewers y restricciones de rama en `infrastructure-prod`; esas protecciones viven en GitHub y deben documentarse aunque no sean expresables en YAML.
+- Nunca hagas que prod sea el valor por defecto de un input, script, matriz operativa o comando documentado.
+- Las políticas pueden variar en severidad por entorno, pero una excepción debe ser concreta, documentada, con propietario, justificación y vencimiento.
+- No afirmes que un perfil protege prod si sus controles solo se ejecutan como warning o si el check no es requerido por branch protection.
 
 ## Archivos sensibles y estado
+
 
 No agregues ni sugieras commitear:
 
@@ -160,7 +187,7 @@ No agregues ni sugieras commitear:
 - `*.pem`
 - `*.key`
 
-El archivo `terraform.tfvars.example` sí debe mantenerse versionado y solo debe contener placeholders.
+Los archivos `environments/*/*.example` deben mantenerse versionados y solo contener placeholders o valores no sensibles.
 
 ## Seguridad y operaciones destructivas
 
@@ -202,7 +229,9 @@ La carpeta `oci/docker-platform` define:
 - `registry.tf`: repositorios opcionales de OCI Container Registry y policy de pull mediante Instance Principal.
 - `deployment.tf`: policies opcionales por principal de CI/CD y permiso de OCI Run Command para la instancia.
 - `observability.tf`: topic, suscripción y alarma opcionales para monitoreo de CPU.
-- `backend.oci.tfbackend.example`: ejemplo sin credenciales para configurar el backend remoto dedicado.
+- `environment.tf`: selector obligatorio y validaciones de seguridad específicas por entorno.
+- `environments/*/backend.oci.tfbackend.example`: backends sin credenciales y con claves de state independientes.
+- `environments/*/terraform.tfvars.example`: parámetros y controles de seguridad por entorno.
 - `locals.tf`: nombres derivados y tags comunes.
 - `outputs.tf`: salidas de compute, red, Vault/KMS, Object Storage, observabilidad, logging, backups, registry y deployment.
 - `cloud-init/bootstrap.yaml.tftpl`: instalación de Docker, OCI CLI, firewalld, estructura `/opt/apps`, helpers opcionales y arranque de Traefik.
@@ -233,6 +262,7 @@ Variables requeridas o de alto impacto:
 - `tenancy_ocid`
 - `compartment_ocid`
 - `compartment_name`
+- `environment_name`
 - `project_name`
 - `oci_auth`
 - `oci_config_file_profile`
@@ -282,7 +312,7 @@ Si agregas variables:
 - Define `description` y `type`.
 - Agrega `default` solo cuando exista un valor seguro y reutilizable.
 - Usa bloques `validation` para opciones cerradas o peligrosas.
-- Actualiza `terraform.tfvars.example`.
+- Actualiza los `terraform.tfvars.example` de todos los entornos afectados.
 - Actualiza el README del módulo si cambia el flujo de uso.
 
 ## IAM, Vault y Object Storage
@@ -460,11 +490,12 @@ terraform validate
 terraform output
 ```
 
-Con backend y variables reales disponibles:
+Con backend y variables reales de un entorno explícito disponibles:
 
 ```bash
-terraform init -backend-config=backend.oci.tfbackend
-terraform plan
+terraform init -reconfigure \
+  -backend-config=environments/ENTORNO/backend.oci.tfbackend
+terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
 Usa `terraform apply` y `terraform destroy` únicamente cuando el usuario lo pida de forma explícita.

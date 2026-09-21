@@ -14,6 +14,9 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
+import hcl2
+from lark.exceptions import LarkError
+
 
 BLOCKING_CHECKS = (
     "CKV_OCI_1",
@@ -25,6 +28,11 @@ WARNING_SKIP_CHECKS = (*BLOCKING_CHECKS, "CKV_OCI_19", "CKV_OCI_22", "CKV2_OCI_2
 IMAGE_RULE = "IAC_DOCKER_001"
 POLICY_ERROR_RULE = "IAC_POLICY_001"
 POLICY_WARNING_RULE = "IAC_POLICY_101"
+ENVIRONMENT_CONFIG_RULE = "IAC_ENV_001"
+ENVIRONMENT_NETWORK_RULE = "IAC_ENV_002"
+ENVIRONMENT_PROD_RULE = "IAC_ENV_003"
+ENVIRONMENT_STAGING_RULE = "IAC_ENV_101"
+ENVIRONMENT_DEV_RULE = "IAC_ENV_102"
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
 IMAGE_LINE = re.compile(r"^\s*image\s*:\s*['\"]?([^\s#'\"]+)")
 VARIABLE_START = re.compile(r'^\s*variable\s+"([^"]+)"\s*\{')
@@ -68,7 +76,7 @@ def normalize_path(raw_path: Any, target: Path, repo_root: Path) -> str:
         if candidate.is_absolute():
             try:
                 value = candidate.resolve().relative_to(repo_root).as_posix()
-            except (OSError, ValueError):
+            except (OSError, ValueError, LarkError):
                 value = candidate.name
         else:
             value = f"{target_posix}/{value.lstrip('/')}"
@@ -248,6 +256,153 @@ def scan_images(repo_root: Path, target: Path) -> list[Finding]:
     return findings
 
 
+def load_hcl_file(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = hcl2.load(handle)
+    if not isinstance(payload, dict):
+        return {}
+
+    # bc-python-hcl2 wraps top-level assignments in a single-item list.
+    return {
+        key: value[0] if isinstance(value, list) and len(value) == 1 else value
+        for key, value in payload.items()
+    }
+
+
+def environment_profile_findings(
+    repo_root: Path, target: Path, environment: str
+) -> list[Finding]:
+    environment_root = repo_root / target / "environments" / environment
+    tfvars_path = environment_root / "terraform.tfvars.example"
+    backend_path = environment_root / "backend.oci.tfbackend.example"
+    findings: list[Finding] = []
+
+    def add(
+        severity: str,
+        rule_id: str,
+        name: str,
+        path: Path,
+        resource: str = "",
+    ) -> None:
+        findings.append(
+            Finding(
+                severity=severity,
+                rule_id=rule_id,
+                name=name,
+                path=path.relative_to(repo_root).as_posix(),
+                resource=resource,
+            )
+        )
+
+    try:
+        variables = load_hcl_file(tfvars_path)
+    except (OSError, ValueError, LarkError):
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "Environment variable example is missing or invalid HCL",
+            tfvars_path,
+        )
+        return findings
+
+    try:
+        backend = load_hcl_file(backend_path)
+    except (OSError, ValueError, LarkError):
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "Environment backend example is missing or invalid HCL",
+            backend_path,
+        )
+        return findings
+
+    if variables.get("environment_name") != environment:
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "environment_name must match the selected environment",
+            tfvars_path,
+            "var.environment_name",
+        )
+
+    expected_key = f"docker-platform/{environment}/terraform.tfstate"
+    if backend.get("key") != expected_key:
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "Remote state key must be unique and match the selected environment",
+            backend_path,
+            "backend.key",
+        )
+
+    if variables.get("object_storage_access_type") != "NoPublicAccess":
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "Object Storage must remain private in every environment",
+            tfvars_path,
+            "var.object_storage_access_type",
+        )
+
+    if variables.get("registry_visibility", "PRIVATE") != "PRIVATE":
+        add(
+            "error",
+            ENVIRONMENT_CONFIG_RULE,
+            "OCIR repositories must remain private",
+            tfvars_path,
+            "var.registry_visibility",
+        )
+
+    if variables.get("object_storage_delete_previous_versions_after_days") is not None:
+        add(
+            "warning",
+            POLICY_WARNING_RULE,
+            "Destructive Object Storage lifecycle requires explicit review",
+            tfvars_path,
+            "var.object_storage_delete_previous_versions_after_days",
+        )
+
+    public_ssh = variables.get("ssh_source_cidr") in ("0.0.0.0/0", "::/0")
+    if public_ssh:
+        add(
+            "warning" if environment == "dev" else "error",
+            ENVIRONMENT_DEV_RULE if environment == "dev" else ENVIRONMENT_NETWORK_RULE,
+            (
+                "Public SSH is accepted only as a documented dev warning"
+                if environment == "dev"
+                else "Public SSH is forbidden in staging and prod"
+            ),
+            tfvars_path,
+            "var.ssh_source_cidr",
+        )
+
+    required_controls = {
+        "monitoring_enabled": variables.get("monitoring_enabled") is True,
+        "logging_enabled": variables.get("logging_enabled") is True,
+        "backup_enabled": variables.get("backup_enabled") is True,
+        "registry_enabled": variables.get("registry_enabled") is True,
+        "registry_immutable": variables.get("registry_immutable") is True,
+        "object_storage_versioning": variables.get("object_storage_versioning") is True,
+    }
+    if environment in {"staging", "prod"}:
+        for control, enabled in required_controls.items():
+            if enabled:
+                continue
+            add(
+                "error" if environment == "prod" else "warning",
+                ENVIRONMENT_PROD_RULE if environment == "prod" else ENVIRONMENT_STAGING_RULE,
+                (
+                    "Production control must be enabled"
+                    if environment == "prod"
+                    else "Staging should approximate production controls"
+                ),
+                tfvars_path,
+                f"var.{control}",
+            )
+
+    return findings
+
+
 def load_exceptions(path: Path, repo_root: Path) -> tuple[list[ExceptionEntry], list[Finding]]:
     errors: list[Finding] = []
     relative_path = path.relative_to(repo_root).as_posix()
@@ -370,7 +525,9 @@ def unique_findings(findings: list[Finding]) -> list[Finding]:
     return unique
 
 
-def publish_summary(findings: list[Finding], unused: list[ExceptionEntry]) -> int:
+def publish_summary(
+    findings: list[Finding], unused: list[ExceptionEntry], environment: str
+) -> int:
     findings = unique_findings(findings)
     active_errors = [item for item in findings if item.severity == "error" and not item.waived]
     warnings = [item for item in findings if item.severity == "warning" and not item.waived]
@@ -389,6 +546,8 @@ def publish_summary(findings: list[Finding], unused: list[ExceptionEntry]) -> in
     result = "FAIL" if active_errors else "PASS"
     lines = [
         "## Terraform Policy as Code",
+        "",
+        f"Environment: `{environment}`",
         "",
         "| Result | Blocking findings | Warnings | Accepted exceptions |",
         "| --- | ---: | ---: | ---: |",
@@ -440,6 +599,12 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True, type=Path)
     parser.add_argument("--exceptions", required=True, type=Path)
+    parser.add_argument(
+        "--environment",
+        required=True,
+        choices=("dev", "staging", "prod"),
+        help="Environment profile whose examples and controls are validated",
+    )
     return parser.parse_args()
 
 
@@ -448,6 +613,7 @@ def main() -> int:
     repo_root = Path.cwd().resolve()
     target = args.directory
     exceptions_path = (repo_root / args.exceptions).resolve()
+    environment = args.environment
 
     blocking = run_checkov(
         repo_root,
@@ -483,13 +649,22 @@ def main() -> int:
         ],
     )
     images = scan_images(repo_root, target)
+    environment_findings = environment_profile_findings(
+        repo_root, target, environment
+    )
     entries, exception_errors = load_exceptions(exceptions_path, repo_root)
 
-    findings = blocking + secrets + warning_baseline + images + exception_errors
+    findings = (
+        blocking
+        + secrets
+        + warning_baseline
+        + images
+        + environment_findings
+        + exception_errors
+    )
     findings, unused = apply_exceptions(findings, entries)
-    return publish_summary(findings, unused)
+    return publish_summary(findings, unused, environment)
 
 
 if __name__ == "__main__":
     sys.exit(main())
-

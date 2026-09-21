@@ -1,0 +1,102 @@
+name: Terraform CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/terraform-ci.yml"
+      - "oci/docker-platform/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Environment configuration to validate
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  validate:
+    name: Validate - ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: ${{ fromJSON(github.event_name == 'workflow_dispatch' && format('["{0}"]', inputs.environment) || '["dev","staging","prod"]') }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: oci/docker-platform
+    env:
+      TF_ENVIRONMENT: ${{ matrix.environment }}
+      TF_VAR_FILE: environments/${{ matrix.environment }}/terraform.tfvars.example
+      TF_BACKEND_FILE: environments/${{ matrix.environment }}/backend.oci.tfbackend.example
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.12.0"
+          terraform_wrapper: false
+
+      - name: Terraform format
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init without backend
+        run: terraform init -backend=false -input=false -no-color
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Validate environment files
+        run: |
+          set -euo pipefail
+
+          for config_file in "$TF_VAR_FILE" "$TF_BACKEND_FILE"; do
+            if [[ ! -f "$config_file" || -L "$config_file" ]]; then
+              echo "::error title=Missing environment example::Expected regular, non-symlink environment files."
+              exit 1
+            fi
+          done
+
+          if ! grep -Eq "^[[:space:]]*environment_name[[:space:]]*=[[:space:]]*\"$TF_ENVIRONMENT\"[[:space:]]*$" "$TF_VAR_FILE"; then
+            echo "::error title=Environment mismatch::The selected environment does not match environment_name in its variable file."
+            exit 1
+          fi
+
+          expected_key="docker-platform/$TF_ENVIRONMENT/terraform.tfstate"
+          if ! grep -Eq "^[[:space:]]*key[[:space:]]*=[[:space:]]*\"$expected_key\"[[:space:]]*$" "$TF_BACKEND_FILE"; then
+            echo "::error title=Remote state mismatch::The backend key does not match the selected environment."
+            exit 1
+          fi
+
+      - name: Publish validation summary
+        run: |
+          {
+            echo "## Terraform validation"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Environment | \`$TF_ENVIRONMENT\` |"
+            echo "| Variables | \`$TF_VAR_FILE\` |"
+            echo "| Backend example | \`$TF_BACKEND_FILE\` |"
+            echo "| Backend access | Disabled; CI does not access OCI or remote state |"
+          } >> "$GITHUB_STEP_SUMMARY"
