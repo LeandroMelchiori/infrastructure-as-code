@@ -25,7 +25,7 @@ resource "oci_core_instance" "server" {
   }
 
   create_vnic_details {
-    subnet_id        = oci_core_subnet.public.id
+    subnet_id        = module.network.public_subnet_id
     assign_public_ip = false
 
     display_name   = "${local.server_name}-vnic"

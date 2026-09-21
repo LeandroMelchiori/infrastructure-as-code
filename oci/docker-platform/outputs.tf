@@ -15,12 +15,12 @@ output "server_private_ip" {
 
 output "vcn_id" {
   description = "OCID de la VCN"
-  value       = oci_core_vcn.platform.id
+  value       = module.network.vcn_id
 }
 
 output "subnet_id" {
   description = "OCID de la subnet pública"
-  value       = oci_core_subnet.public.id
+  value       = module.network.public_subnet_id
 }
 
 output "vault_id" {

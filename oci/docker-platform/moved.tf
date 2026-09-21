@@ -42,3 +42,28 @@ moved {
   from = oci_objectstorage_object_lifecycle_policy.media
   to   = module.storage.oci_objectstorage_object_lifecycle_policy.media
 }
+
+moved {
+  from = oci_core_vcn.platform
+  to   = module.network.oci_core_vcn.platform
+}
+
+moved {
+  from = oci_core_internet_gateway.platform
+  to   = module.network.oci_core_internet_gateway.platform
+}
+
+moved {
+  from = oci_core_route_table.public
+  to   = module.network.oci_core_route_table.public
+}
+
+moved {
+  from = oci_core_security_list.public
+  to   = module.network.oci_core_security_list.public
+}
+
+moved {
+  from = oci_core_subnet.public
+  to   = module.network.oci_core_subnet.public
+}

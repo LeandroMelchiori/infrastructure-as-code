@@ -1,6 +1,6 @@
 resource "oci_core_network_security_group" "server" {
   compartment_id = var.compartment_ocid
-  vcn_id         = oci_core_vcn.platform.id
+  vcn_id         = module.network.vcn_id
 
   display_name = "${var.project_name}-server-nsg"
 
