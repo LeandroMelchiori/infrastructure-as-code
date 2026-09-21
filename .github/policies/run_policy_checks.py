@@ -194,6 +194,18 @@ def run_checkov(
     return findings
 
 
+def run_checkov_for_targets(
+    repo_root: Path,
+    targets: list[Path],
+    severity: str,
+    arguments: list[str],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    for target in targets:
+        findings.extend(run_checkov(repo_root, target, severity, arguments))
+    return findings
+
+
 def image_uses_latest(reference: str) -> bool:
     value = reference.strip().strip("'\"")
     if not value or "${" in value or "{{" in value:
@@ -759,6 +771,13 @@ def publish_summary(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--directory", required=True, type=Path)
+    parser.add_argument(
+        "--module-directory",
+        action="append",
+        default=[],
+        type=Path,
+        help="Additional local module directory included in static policy scans",
+    )
     parser.add_argument("--exceptions", required=True, type=Path)
     parser.add_argument(
         "--environment",
@@ -773,12 +792,13 @@ def main() -> int:
     args = parse_args()
     repo_root = Path.cwd().resolve()
     target = args.directory
+    scan_targets = [target, *args.module_directory]
     exceptions_path = (repo_root / args.exceptions).resolve()
     environment = args.environment
 
-    blocking = run_checkov(
+    blocking = run_checkov_for_targets(
         repo_root,
-        target,
+        scan_targets,
         "error",
         [
             "--framework",
@@ -789,15 +809,15 @@ def main() -> int:
             ",".join(BLOCKING_CHECKS),
         ],
     )
-    secrets = run_checkov(
+    secrets = run_checkov_for_targets(
         repo_root,
-        target,
+        scan_targets,
         "error",
         ["--framework", "secrets"],
     )
-    warning_baseline = run_checkov(
+    warning_baseline = run_checkov_for_targets(
         repo_root,
-        target,
+        scan_targets,
         "warning",
         [
             "--framework",
@@ -809,7 +829,11 @@ def main() -> int:
             "--soft-fail",
         ],
     )
-    images = scan_images(repo_root, target)
+    images = [
+        finding
+        for scan_target in scan_targets
+        for finding in scan_images(repo_root, scan_target)
+    ]
     container_findings = scan_container_hardening(repo_root, target, environment)
     environment_findings = environment_profile_findings(
         repo_root, target, environment

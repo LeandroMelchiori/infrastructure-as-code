@@ -6,6 +6,7 @@ on:
       - ".github/policies/**"
       - ".github/workflows/terraform-policy.yml"
       - "oci/docker-platform/**"
+      - "oci/modules/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -27,6 +28,7 @@ concurrency:
 env:
   CHECKOV_VERSION: "3.3.8"
   POLICY_TARGET: oci/docker-platform
+  POLICY_MODULES: oci/modules
 
 jobs:
   policy:
@@ -52,9 +54,13 @@ jobs:
             --no-cache-dir \
             "checkov==${CHECKOV_VERSION}"
 
-      - name: Test deployment hardening policy
+      - name: Test local policies
         run: |
           set -euo pipefail
+          python3 -m unittest discover \
+            -s .github/policies/tests \
+            -p 'test_*.py' \
+            -v
           python3 -m unittest discover \
             -s oci/docker-platform/deployment/tests \
             -p 'test_*.py' \
@@ -65,5 +71,6 @@ jobs:
           set -euo pipefail
           python3 .github/policies/run_policy_checks.py \
             --directory "$POLICY_TARGET" \
+            --module-directory "$POLICY_MODULES" \
             --exceptions .github/policies/exceptions.json \
             --environment "${{ matrix.environment }}"

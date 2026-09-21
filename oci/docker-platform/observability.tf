@@ -1,44 +1,20 @@
-resource "oci_ons_notification_topic" "alerts" {
-  count = var.monitoring_enabled ? 1 : 0
+module "observability" {
+  source = "../modules/observability"
 
-  compartment_id = var.compartment_ocid
-  name           = local.notification_topic_name
-  description    = "Alertas de infraestructura para ${var.project_name}"
+  providers = {
+    oci = oci
+  }
 
-  freeform_tags = local.common_tags
-}
-
-resource "oci_ons_subscription" "alerts" {
-  count = var.monitoring_enabled ? 1 : 0
-
-  compartment_id = var.compartment_ocid
-  topic_id       = oci_ons_notification_topic.alerts[0].id
-  protocol       = var.notification_protocol
-  endpoint       = var.notification_endpoint
-
-  freeform_tags = local.common_tags
-}
-
-resource "oci_monitoring_alarm" "high_cpu" {
-  count = var.monitoring_enabled ? 1 : 0
-
-  compartment_id        = var.compartment_ocid
-  metric_compartment_id = var.compartment_ocid
-
-  display_name = "${var.project_name}-high-cpu"
-  body         = "La instancia ${local.server_name} superó el umbral de CPU configurado."
-  severity     = var.cpu_alarm_severity
-  is_enabled   = true
-
-  namespace = "oci_vmi_resource_utilization"
-  query = format(
-    "CpuUtilization[5m]{resourceId = \"%s\"}.mean() > %g",
-    oci_core_instance.server.id,
-    var.cpu_alarm_threshold_percent
-  )
-
-  pending_duration = "PT${var.cpu_alarm_pending_duration_minutes}M"
-  destinations     = [oci_ons_notification_topic.alerts[0].id]
-
-  freeform_tags = local.common_tags
+  compartment_ocid                   = var.compartment_ocid
+  project_name                       = var.project_name
+  server_name                        = local.server_name
+  instance_id                        = oci_core_instance.server.id
+  monitoring_enabled                 = var.monitoring_enabled
+  notification_topic_name            = local.notification_topic_name
+  notification_protocol              = var.notification_protocol
+  notification_endpoint              = var.notification_endpoint
+  cpu_alarm_threshold_percent        = var.cpu_alarm_threshold_percent
+  cpu_alarm_pending_duration_minutes = var.cpu_alarm_pending_duration_minutes
+  cpu_alarm_severity                 = var.cpu_alarm_severity
+  common_tags                        = local.common_tags
 }

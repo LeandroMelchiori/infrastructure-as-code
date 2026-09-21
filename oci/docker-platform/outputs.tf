@@ -25,12 +25,12 @@ output "subnet_id" {
 
 output "vault_id" {
   description = "OCID del Vault"
-  value       = oci_kms_vault.platform.id
+  value       = module.vault.vault_id
 }
 
 output "key_id" {
   description = "OCID de la KMS Key"
-  value       = oci_kms_key.platform.id
+  value       = module.vault.key_id
 }
 
 output "object_storage_namespace" {
@@ -181,20 +181,20 @@ output "monitoring_enabled" {
 
 output "notification_topic_id" {
   description = "OCID del topic de OCI Notifications, o null si el monitoreo está deshabilitado"
-  value       = try(oci_ons_notification_topic.alerts[0].id, null)
+  value       = module.observability.notification_topic_id
 }
 
 output "notification_subscription_id" {
   description = "OCID de la suscripción de alertas, o null si el monitoreo está deshabilitado"
-  value       = try(oci_ons_subscription.alerts[0].id, null)
+  value       = module.observability.notification_subscription_id
 }
 
 output "notification_subscription_state" {
   description = "Estado de la suscripción de alertas, o null si el monitoreo está deshabilitado"
-  value       = try(oci_ons_subscription.alerts[0].state, null)
+  value       = module.observability.notification_subscription_state
 }
 
 output "cpu_alarm_id" {
   description = "OCID de la alarma de CPU, o null si el monitoreo está deshabilitado"
-  value       = try(oci_monitoring_alarm.high_cpu[0].id, null)
+  value       = module.observability.cpu_alarm_id
 }

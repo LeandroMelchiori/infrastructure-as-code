@@ -594,7 +594,9 @@ imágenes de gran tamaño.
 ## Observabilidad y alertas
 
 La observabilidad es opcional y utiliza servicios nativos de OCI sin depender de
-ninguna aplicación desplegada en Docker.
+ninguna aplicación desplegada en Docker. Los recursos viven en el módulo local
+`oci/modules/observability`; `oci/docker-platform` conserva la selección por
+entorno, los nombres derivados, la instancia monitoreada y los outputs públicos.
 
 Cuando `monitoring_enabled = true`, Terraform crea:
 
@@ -832,7 +834,9 @@ Los certificados se almacenan en:
 
 ## OCI Vault
 
-Terraform crea un Vault para la plataforma.
+Terraform crea un Vault para la plataforma mediante el módulo local
+oci/modules/vault. El root conserva los nombres derivados, tags y outputs
+públicos.
 
 El nombre se genera a partir del nombre del proyecto.
 
@@ -931,6 +935,7 @@ docker-platform/
 ├── logging.tf
 ├── network.tf
 ├── observability.tf
+├── moved.tf
 ├── outputs.tf
 ├── providers.tf
 ├── registry.tf
@@ -1730,7 +1735,8 @@ reutilizar rutas protegidas ni claves de state.
 ## Policy as Code
 
 El workflow `.github/workflows/terraform-policy.yml` analiza los cambios de
-`oci/docker-platform` en cada pull request y también admite ejecución manual con
+`oci/docker-platform` y sus módulos locales bajo `oci/modules` en cada pull
+request y también admite ejecución manual con
 `workflow_dispatch`. Usa Checkov fijado a una versión concreta y políticas
 locales versionadas en `.github/policies`.
 
@@ -1828,6 +1834,7 @@ Para ejecutar localmente el mismo control:
 python3 -m pip install checkov==3.3.8
 python3 .github/policies/run_policy_checks.py \
   --directory oci/docker-platform \
+  --module-directory oci/modules \
   --exceptions .github/policies/exceptions.json \
   --environment dev
 ```

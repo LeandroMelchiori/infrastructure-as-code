@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/terraform-ci.yml"
       - "oci/docker-platform/**"
+      - "oci/modules/**"
   workflow_dispatch:
     inputs:
       environment:
@@ -58,7 +59,9 @@ jobs:
           terraform_wrapper: false
 
       - name: Terraform format
-        run: terraform fmt -check -recursive
+        run: |
+          terraform fmt -check -recursive
+          terraform fmt -check -recursive ../modules
 
       - name: Terraform init without backend
         run: terraform init -backend=false -input=false -no-color
