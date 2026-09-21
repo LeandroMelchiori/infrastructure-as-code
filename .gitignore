@@ -38,3 +38,7 @@ Thumbs.db
 
 # AGENTS
 .AGENTS.md
+
+# Documentación local generada para estudio
+docs/
+docs/*.pdf

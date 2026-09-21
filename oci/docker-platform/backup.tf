@@ -1,36 +1,21 @@
-locals {
-  backup_periods = {
-    DAILY   = "ONE_DAY"
-    WEEKLY  = "ONE_WEEK"
-    MONTHLY = "ONE_MONTH"
-  }
-}
+module "backup" {
+  source = "../modules/backup"
 
-resource "oci_core_volume_backup_policy" "boot" {
-  count = var.backup_enabled ? 1 : 0
-
-  compartment_id = var.compartment_ocid
-  display_name   = "${var.project_name}-boot-backup"
-
-  schedules {
-    backup_type       = var.backup_type
-    period            = local.backup_periods[var.backup_frequency]
-    retention_seconds = var.backup_retention_days * 86400
-    offset_type       = "STRUCTURED"
-    hour_of_day       = var.backup_hour_utc
-    day_of_week       = var.backup_frequency == "WEEKLY" ? var.backup_day_of_week : null
-    day_of_month      = var.backup_frequency == "MONTHLY" ? var.backup_day_of_month : null
-    time_zone         = "UTC"
+  providers = {
+    oci = oci
   }
 
-  freeform_tags = local.common_tags
-}
-
-resource "oci_core_volume_backup_policy_assignment" "boot" {
-  count = var.backup_enabled ? 1 : 0
-
-  asset_id  = oci_core_instance.server.boot_volume_id
-  policy_id = oci_core_volume_backup_policy.boot[0].id
+  backup_enabled        = var.backup_enabled
+  compartment_ocid      = var.compartment_ocid
+  project_name          = var.project_name
+  common_tags           = local.common_tags
+  boot_volume_id        = oci_core_instance.server.boot_volume_id
+  backup_frequency      = var.backup_frequency
+  backup_type           = var.backup_type
+  backup_retention_days = var.backup_retention_days
+  backup_hour_utc       = var.backup_hour_utc
+  backup_day_of_week    = var.backup_day_of_week
+  backup_day_of_month   = var.backup_day_of_month
 }
 
 resource "oci_objectstorage_object_lifecycle_policy" "media" {

@@ -22,3 +22,13 @@ moved {
   from = oci_kms_key.platform
   to   = module.vault.oci_kms_key.platform
 }
+
+moved {
+  from = oci_core_volume_backup_policy.boot
+  to   = module.backup.oci_core_volume_backup_policy.boot
+}
+
+moved {
+  from = oci_core_volume_backup_policy_assignment.boot
+  to   = module.backup.oci_core_volume_backup_policy_assignment.boot
+}

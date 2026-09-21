@@ -230,7 +230,9 @@ La clave pública SSH configurada en Terraform se agrega automáticamente a la i
 ## Backups y recuperación
 
 La capa de backup es opcional, genérica y no depende de las aplicaciones
-desplegadas en Docker. Permanece deshabilitada por defecto:
+desplegadas en Docker. La policy y su asignación viven en el módulo local
+`oci/modules/backup`; Compute y la selección por entorno permanecen en el root.
+Backup permanece deshabilitado por defecto:
 
 ```hcl
 backup_enabled = false
