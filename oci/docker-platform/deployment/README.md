@@ -30,9 +30,11 @@ workflow. Un administrador debe crear:
 ```text
 /etc/docker-platform/apps/<app>/deployment.json
 /etc/docker-platform/apps/<app>/compose.yaml
+/etc/docker-platform/apps/<app>/hardening.json  # opcional; root-owned
 ```
 
-Usa `app-config.example.json` y `compose.example.yml` como referencia. Instala
+Usa `app-config.example.json`, `compose.example.yml` y
+`hardening.example.json` como referencia. Instala
 directorios con modo `0750`, archivos con modo `0640` y propietario
 `root:root`. No se admiten symlinks ni rutas configurables.
 
@@ -48,6 +50,76 @@ La configuración Compose soportada es deliberadamente pequeña. No admite
 `build`, ports publicados, bind mounts, secrets/configs de Compose, devices,
 capacidades adicionales ni namespaces del host. Los datos persistentes deben
 usar named volumes y el acceso HTTP debe pasar por la red externa de Traefik.
+
+## Baseline de Container Hardening
+
+El wrapper valida el Compose normalizado antes del primer pull y vuelve a
+validarlo después de resolver el digest y durante rollback. Todos los servicios
+deben declarar:
+
+- `security_opt: [no-new-privileges:true]`;
+- `cap_drop: [ALL]`, sin `cap_add`;
+- límites positivos `cpus` y `mem_limit`;
+- usuario numérico con UID distinto de cero;
+- `read_only: true`;
+- `/tmp` como tmpfs con `rw`, `noexec`, `nosuid` y `nodev`;
+- imagen construida por el servidor o auxiliar OCIR fijada por digest.
+
+El servicio desplegable también debe tener un healthcheck Compose activo. El
+health check externo de `deployment.json` continúa siendo una segunda señal y
+activa rollback si falla.
+
+Los bind mounts, Docker socket, montaje de `/`, `privileged`, host networking,
+`pid: host`, `ipc: host`, devices, capacidades adicionales y puertos publicados
+son controles críticos: no existe excepción para ellos. Los mounts admitidos son
+named volumes declarados y, por defecto, read-only. Solo la red externa
+root-managed llamada `proxy` está permitida; los servicios auxiliares deben usar
+una red de aplicación `internal: true` y no unirse a `proxy` salvo excepción.
+
+### Excepciones root-owned
+
+Sin `hardening.json` se usa el perfil `strict`, que no admite excepciones. Un
+administrador puede crear el archivo con perfil `dev`, `staging` o `prod` y una
+lista cerrada de excepciones. Cada entrada exige `control`, `service`, `reason`
+de 20 a 500 caracteres y `expires_on` en formato `YYYY-MM-DD`. Una excepción
+vencida bloquea el deployment. `writable_volume` exige además el `target` exacto.
+
+```json
+{
+  "profile": "prod",
+  "exceptions": [
+    {
+      "control": "writable_volume",
+      "service": "app",
+      "target": "/var/lib/example",
+      "reason": "El servicio persiste datos hasta completar la migracion externa.",
+      "expires_on": "2027-01-31"
+    }
+  ]
+}
+```
+
+Los únicos controles exceptuables son `non_root_user`, `read_only_rootfs`,
+`secure_tmpfs`, `writable_volume`, `private_network` y
+`shared_proxy_network`. `no-new-privileges`, capabilities, digest, healthcheck,
+límites CPU/memoria y todos los controles de escape del host siguen bloqueando
+en cualquier perfil. El wrapper registra control, servicio, target y vencimiento,
+pero nunca imprime la justificación ni contenido del Compose.
+
+Policy as Code trata las desviaciones de compatibilidad como warnings en `dev`
+y como errores en `staging` y `prod`. Las violaciones críticas bloquean siempre.
+La excepción runtime vive en la VM porque solo root puede aprobarla; una
+excepción del scanner del repositorio sigue requiriendo propietario,
+justificación y vencimiento en `.github/policies/exceptions.json`.
+
+### Compatibilidad
+
+Imágenes que escriben en el root filesystem, dependen de UID 0, carecen de una
+herramienta de healthcheck o no toleran límites de recursos deben corregirse o
+recibir una excepción compatible y temporal. Un tmpfs consume memoria de la VM;
+límites demasiado bajos pueden producir throttling u OOM. Actualizar el wrapper
+en una VM existente no modifica Compute, pero el siguiente deployment validará
+también el Compose utilizado para rollback.
 
 ## Instancia existente
 

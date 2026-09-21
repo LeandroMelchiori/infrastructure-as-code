@@ -15,6 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 import hcl2
+import yaml
 from lark.exceptions import LarkError
 
 
@@ -33,6 +34,9 @@ ENVIRONMENT_NETWORK_RULE = "IAC_ENV_002"
 ENVIRONMENT_PROD_RULE = "IAC_ENV_003"
 ENVIRONMENT_STAGING_RULE = "IAC_ENV_101"
 ENVIRONMENT_DEV_RULE = "IAC_ENV_102"
+CONTAINER_CRITICAL_RULE = "IAC_CONTAINER_001"
+CONTAINER_BASELINE_RULE = "IAC_CONTAINER_002"
+CONTAINER_DEV_RULE = "IAC_CONTAINER_101"
 SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9_.:-]+$")
 IMAGE_LINE = re.compile(r"^\s*image\s*:\s*['\"]?([^\s#'\"]+)")
 VARIABLE_START = re.compile(r'^\s*variable\s+"([^"]+)"\s*\{')
@@ -255,6 +259,163 @@ def scan_images(repo_root: Path, target: Path) -> list[Finding]:
 
     return findings
 
+
+def scan_container_hardening(
+    repo_root: Path, target: Path, environment: str
+) -> list[Finding]:
+    compose_path = repo_root / target / "deployment" / "compose.example.yml"
+    config_path = repo_root / target / "deployment" / "app-config.example.json"
+    findings: list[Finding] = []
+
+    def add(severity: str, rule_id: str, name: str, resource: str = "") -> None:
+        findings.append(
+            Finding(
+                severity=severity,
+                rule_id=rule_id,
+                name=name,
+                path=compose_path.relative_to(repo_root).as_posix(),
+                resource=resource,
+            )
+        )
+
+    def critical(name: str, resource: str = "") -> None:
+        add("error", CONTAINER_CRITICAL_RULE, name, resource)
+
+    def baseline(name: str, resource: str = "") -> None:
+        add(
+            "warning" if environment == "dev" else "error",
+            CONTAINER_DEV_RULE if environment == "dev" else CONTAINER_BASELINE_RULE,
+            name,
+            resource,
+        )
+
+    try:
+        compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
+        app_config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError):
+        critical("Container hardening examples are missing or invalid")
+        return findings
+
+    if not isinstance(compose, dict) or not isinstance(compose.get("services"), dict):
+        critical("Compose hardening example must define services")
+        return findings
+    target_service = app_config.get("service") if isinstance(app_config, dict) else None
+    services = compose["services"]
+    networks = compose.get("networks", {})
+    if target_service not in services:
+        critical("Deployment service must exist in the Compose hardening example")
+
+    proxy_networks = set()
+    if not isinstance(networks, dict):
+        critical("Compose networks must use object syntax")
+        networks = {}
+    for network_name, network in networks.items():
+        network = network or {}
+        if not isinstance(network, dict):
+            critical("Network definitions must use object syntax", f"network.{network_name}")
+            continue
+        if network.get("external"):
+            if network.get("name") != "proxy":
+                critical("Only the root-managed proxy network may be external", f"network.{network_name}")
+            proxy_networks.add(network_name)
+
+    forbidden_keys = {
+        "build",
+        "cap_add",
+        "devices",
+        "ipc",
+        "network_mode",
+        "pid",
+        "ports",
+        "privileged",
+        "runtime",
+        "userns_mode",
+    }
+    for service_name, service in services.items():
+        resource = f"service.{service_name}"
+        if not isinstance(service, dict):
+            critical("Service definition must use object syntax", resource)
+            continue
+
+        if set(service) & forbidden_keys:
+            critical("Service contains a forbidden host-level capability", resource)
+
+        image = service.get("image")
+        if not isinstance(image, str) or (
+            "${DEPLOY_IMAGE" not in image and "@sha256:" not in image
+        ):
+            critical("Service image must be server-resolved or pinned by digest", resource)
+
+        security_options = service.get("security_opt", [])
+        if not isinstance(security_options, list) or not set(security_options).intersection(
+            {"no-new-privileges", "no-new-privileges:true"}
+        ):
+            critical("Service must enable no-new-privileges", resource)
+
+        cap_drop = service.get("cap_drop", [])
+        if not isinstance(cap_drop, list) or set(cap_drop) != {"ALL"}:
+            critical("Service must drop all Linux capabilities", resource)
+
+        healthcheck = service.get("healthcheck")
+        if service_name == target_service and (
+            not isinstance(healthcheck, dict)
+            or healthcheck.get("disable") is True
+            or not healthcheck.get("test")
+        ):
+            critical("Deployable service must define an active healthcheck", resource)
+
+        user = service.get("user")
+        if not isinstance(user, str) or not re.fullmatch(r"[1-9][0-9]*(?::[0-9]+)?", user):
+            baseline("Service should declare a numeric non-root user", resource)
+        if service.get("read_only") is not True:
+            baseline("Service root filesystem should be read-only", resource)
+
+        secure_tmpfs = False
+        tmpfs = service.get("tmpfs", [])
+        if isinstance(tmpfs, list):
+            for entry in tmpfs:
+                if not isinstance(entry, str):
+                    continue
+                tmpfs_target, separator, options = entry.partition(":")
+                option_names = {
+                    option.split("=", 1)[0] for option in options.split(",")
+                }
+                if (
+                    tmpfs_target == "/tmp"
+                    and separator
+                    and {"rw", "noexec", "nosuid", "nodev"}.issubset(option_names)
+                ):
+                    secure_tmpfs = True
+        if not secure_tmpfs:
+            baseline("Service should use a restricted /tmp tmpfs", resource)
+
+        if not service.get("cpus") or not service.get("mem_limit"):
+            critical("Service must define CPU and memory limits", resource)
+
+        mounts = service.get("volumes", [])
+        if not isinstance(mounts, list):
+            critical("Service volumes must use list syntax", resource)
+        else:
+            for mount in mounts:
+                if not isinstance(mount, dict) or mount.get("type") != "volume":
+                    critical("Bind mounts and short mount syntax are forbidden", resource)
+                    continue
+                target_path = mount.get("target")
+                if target_path in {"/", "/run/docker.sock", "/var/run/docker.sock"}:
+                    critical("Sensitive mount target is forbidden", resource)
+                if mount.get("read_only") is not True:
+                    baseline("Writable volume requires a documented runtime exception", resource)
+
+        service_networks = service.get("networks", [])
+        if isinstance(service_networks, dict):
+            service_networks = list(service_networks)
+        if not isinstance(service_networks, list):
+            critical("Service networks must use list or object syntax", resource)
+            service_networks = []
+        if service_name != target_service and set(service_networks) & proxy_networks:
+            baseline("Auxiliary service should not join the shared proxy network", resource)
+
+    return findings
 
 def load_hcl_file(path: Path) -> dict[str, Any]:
     with path.open("r", encoding="utf-8") as handle:
@@ -649,6 +810,7 @@ def main() -> int:
         ],
     )
     images = scan_images(repo_root, target)
+    container_findings = scan_container_hardening(repo_root, target, environment)
     environment_findings = environment_profile_findings(
         repo_root, target, environment
     )
@@ -659,6 +821,7 @@ def main() -> int:
         + secrets
         + warning_baseline
         + images
+        + container_findings
         + environment_findings
         + exception_errors
     )

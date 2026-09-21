@@ -52,6 +52,14 @@ jobs:
             --no-cache-dir \
             "checkov==${CHECKOV_VERSION}"
 
+      - name: Test deployment hardening policy
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover \
+            -s oci/docker-platform/deployment/tests \
+            -p 'test_*.py' \
+            -v
+
       - name: Run security and architecture policies
         run: |
           set -euo pipefail
@@ -59,4 +67,3 @@ jobs:
             --directory "$POLICY_TARGET" \
             --exceptions .github/policies/exceptions.json \
             --environment "${{ matrix.environment }}"
-

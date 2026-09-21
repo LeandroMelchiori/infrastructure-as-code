@@ -4,6 +4,7 @@
 import fcntl
 import json
 import logging
+import math
 import os
 import re
 import shutil
@@ -14,6 +15,7 @@ import tempfile
 import time
 import urllib.parse
 import urllib.request
+from datetime import date
 from pathlib import Path
 
 
@@ -26,6 +28,7 @@ OCIR_REPOSITORY_PATTERN = re.compile(
     r"[a-z0-9]+(?:[._/-][a-z0-9]+)*$"
 )
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+SERVICE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 
 CONFIG_KEYS = {
     "allowed_images",
@@ -38,6 +41,7 @@ TOP_LEVEL_KEYS = {"name", "networks", "services", "volumes"}
 SERVICE_KEYS = {
     "cap_drop",
     "command",
+    "cpus",
     "depends_on",
     "entrypoint",
     "environment",
@@ -48,7 +52,9 @@ SERVICE_KEYS = {
     "init",
     "labels",
     "logging",
+    "mem_limit",
     "networks",
+    "pids_limit",
     "platform",
     "read_only",
     "restart",
@@ -115,6 +121,18 @@ HEALTHCHECK_KEYS = {
     "timeout",
 }
 LOGGING_KEYS = {"driver", "options"}
+HARDENING_POLICY_KEYS = {"exceptions", "profile"}
+HARDENING_EXCEPTION_BASE_KEYS = {"control", "expires_on", "reason", "service"}
+HARDENING_PROFILES = {"dev", "prod", "staging", "strict"}
+HARDENING_EXCEPTION_CONTROLS = {
+    "non_root_user",
+    "private_network",
+    "read_only_rootfs",
+    "secure_tmpfs",
+    "shared_proxy_network",
+    "writable_volume",
+}
+TMPFS_REQUIRED_OPTIONS = {"nodev", "noexec", "nosuid", "rw"}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -241,7 +259,7 @@ def load_application(app_name):
     ):
         raise DeploymentError("compose_file must be a simple YAML file name")
 
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}", config["service"]):
+    if not SERVICE_PATTERN.fullmatch(config["service"]):
         raise DeploymentError("service name is invalid")
 
     if not OCIR_REPOSITORY_PATTERN.fullmatch(config["repository"]):
@@ -267,7 +285,81 @@ def load_application(app_name):
 
     compose_path = app_directory / compose_name
     assert_secure_path(compose_path, "file")
-    return config, compose_path
+    hardening_policy = load_hardening_policy(app_directory)
+    return config, compose_path, hardening_policy
+
+
+def validate_container_path(value, context):
+    if not isinstance(value, str) or not value.startswith("/"):
+        raise DeploymentError(f"{context} must be an absolute container path")
+    parts = value.split("/")[1:]
+    if "\x00" in value or "//" in value or any(part in {"", ".", ".."} for part in parts):
+        raise DeploymentError(f"{context} must be a normalized container path")
+
+
+def validate_hardening_policy(payload):
+    if not isinstance(payload, dict) or set(payload) != HARDENING_POLICY_KEYS:
+        raise DeploymentError("hardening.json does not match the closed schema")
+    if not isinstance(payload["profile"], str) or payload["profile"] not in HARDENING_PROFILES:
+        raise DeploymentError("hardening profile is invalid")
+    if not isinstance(payload["exceptions"], list):
+        raise DeploymentError("hardening exceptions must be an array")
+    if payload["profile"] == "strict" and payload["exceptions"]:
+        raise DeploymentError("the strict hardening profile does not permit exceptions")
+
+    today = date.today()
+    seen = set()
+    for exception in payload["exceptions"]:
+        if not isinstance(exception, dict):
+            raise DeploymentError("hardening exception must be an object")
+        expected_keys = set(HARDENING_EXCEPTION_BASE_KEYS)
+        if exception.get("control") == "writable_volume":
+            expected_keys.add("target")
+        if set(exception) != expected_keys:
+            raise DeploymentError("hardening exception does not match the closed schema")
+        if (
+            not isinstance(exception["control"], str)
+            or exception["control"] not in HARDENING_EXCEPTION_CONTROLS
+        ):
+            raise DeploymentError("hardening exception control is invalid")
+        if (
+            not isinstance(exception["service"], str)
+            or not SERVICE_PATTERN.fullmatch(exception["service"])
+        ):
+            raise DeploymentError("hardening exception service is invalid")
+        reason = exception["reason"]
+        if not isinstance(reason, str) or not 20 <= len(reason.strip()) <= 500:
+            raise DeploymentError("hardening exception reason must contain 20 to 500 characters")
+        try:
+            expires_on = date.fromisoformat(exception["expires_on"])
+        except (TypeError, ValueError) as error:
+            raise DeploymentError("hardening exception expiration must use YYYY-MM-DD") from error
+        if expires_on < today:
+            raise DeploymentError("hardening exception has expired")
+
+        target = exception.get("target")
+        if target is not None:
+            validate_container_path(target, "hardening exception target")
+        identity = (exception["control"], exception["service"], target)
+        if identity in seen:
+            raise DeploymentError("hardening exception is duplicated")
+        seen.add(identity)
+
+    return payload
+
+
+def load_hardening_policy(app_directory):
+    policy_path = app_directory / "hardening.json"
+    try:
+        os.lstat(policy_path)
+    except FileNotFoundError:
+        return {"profile": "strict", "exceptions": []}
+
+    try:
+        payload = json.loads(read_secure_text(policy_path))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise DeploymentError("hardening.json is not valid JSON") from error
+    return validate_hardening_policy(payload)
 
 
 def command_environment(image_uri=None):
@@ -350,6 +442,199 @@ def require_scalar_map(value, context, allow_null=False):
             continue
         if not isinstance(item, allowed_types):
             raise DeploymentError(f"{context} values must be scalar")
+
+
+def find_hardening_exception(policy, used_exceptions, control, service, target=None):
+    for exception in policy["exceptions"]:
+        if (
+            exception["control"] == control
+            and exception["service"] == service
+            and exception.get("target") == target
+        ):
+            used_exceptions.add((control, service, target))
+            LOGGER.warning(
+                "stage=hardening_exception profile=%s control=%s service=%s target=%s expires_on=%s",
+                policy["profile"],
+                control,
+                service,
+                target or "none",
+                exception["expires_on"],
+            )
+            return True
+    return False
+
+
+def require_compatibility_control(
+    condition, policy, used_exceptions, control, service, message, target=None
+):
+    if condition or find_hardening_exception(
+        policy, used_exceptions, control, service, target
+    ):
+        return
+    raise DeploymentError(message)
+
+
+def has_non_root_user(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9]+(?::[0-9]+)?", value):
+        return False
+    return int(value.split(":", 1)[0]) > 0
+
+
+def has_secure_tmpfs(entries):
+    if not isinstance(entries, list):
+        return False
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        target, separator, options = entry.partition(":")
+        if target != "/tmp" or not separator:
+            continue
+        option_names = {option.split("=", 1)[0] for option in options.split(",")}
+        if TMPFS_REQUIRED_OPTIONS.issubset(option_names):
+            return True
+    return False
+
+
+def positive_number(value):
+    if isinstance(value, bool):
+        return False
+    try:
+        number = float(value)
+        return math.isfinite(number) and number > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def positive_memory_limit(value):
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return value > 0
+    if not isinstance(value, str):
+        return False
+    return bool(re.fullmatch(r"[1-9][0-9]*(?:[bkmg]i?b?)?", value, re.IGNORECASE))
+
+
+def active_healthcheck(service):
+    healthcheck = service.get("healthcheck")
+    if not isinstance(healthcheck, dict) or healthcheck.get("disable") is True:
+        return False
+    test = healthcheck.get("test")
+    if isinstance(test, str):
+        return bool(test.strip()) and test.strip().upper() != "NONE"
+    if isinstance(test, list):
+        return len(test) > 1 and test[0] in {"CMD", "CMD-SHELL"}
+    return False
+
+
+def service_network_names(service):
+    networks = service.get("networks", {})
+    return set(networks if isinstance(networks, list) else networks.keys())
+
+
+def validate_container_hardening(rendered, config, policy):
+    services = rendered["services"]
+    networks = rendered.get("networks", {})
+    target_service = config["service"]
+    used_exceptions = set()
+
+    proxy_networks = set()
+    for network_name, network in networks.items():
+        network = network or {}
+        if network.get("external"):
+            if network.get("name") != "proxy":
+                raise DeploymentError("only the root-managed proxy network may be external")
+            proxy_networks.add(network_name)
+
+    for service_name, service in services.items():
+        security_options = set(service.get("security_opt", []))
+        if not security_options.intersection({"no-new-privileges", "no-new-privileges:true"}):
+            raise DeploymentError("every service must enable no-new-privileges")
+        if set(service.get("cap_drop", [])) != {"ALL"}:
+            raise DeploymentError("every service must drop all Linux capabilities")
+        if not positive_number(service.get("cpus")):
+            raise DeploymentError("every service must define a positive CPU limit")
+        if not positive_memory_limit(service.get("mem_limit")):
+            raise DeploymentError("every service must define a positive memory limit")
+        if "pids_limit" in service and (
+            isinstance(service["pids_limit"], bool)
+            or not isinstance(service["pids_limit"], int)
+            or service["pids_limit"] <= 0
+        ):
+            raise DeploymentError("pids_limit must be a positive integer")
+
+        require_compatibility_control(
+            has_non_root_user(service.get("user")),
+            policy,
+            used_exceptions,
+            "non_root_user",
+            service_name,
+            "service must declare a numeric non-root user",
+        )
+        require_compatibility_control(
+            service.get("read_only") is True,
+            policy,
+            used_exceptions,
+            "read_only_rootfs",
+            service_name,
+            "service root filesystem must be read-only",
+        )
+        require_compatibility_control(
+            has_secure_tmpfs(service.get("tmpfs", [])),
+            policy,
+            used_exceptions,
+            "secure_tmpfs",
+            service_name,
+            "service must provide a restricted /tmp tmpfs",
+        )
+
+        service_networks = service_network_names(service)
+        if service_name != target_service:
+            require_compatibility_control(
+                not bool(service_networks & proxy_networks),
+                policy,
+                used_exceptions,
+                "shared_proxy_network",
+                service_name,
+                "auxiliary services must not join the shared proxy network",
+            )
+            if len(services) > 1:
+                private_network = any(
+                    network_name in networks
+                    and not (networks[network_name] or {}).get("external", False)
+                    and (networks[network_name] or {}).get("internal") is True
+                    for network_name in service_networks
+                )
+                require_compatibility_control(
+                    private_network,
+                    policy,
+                    used_exceptions,
+                    "private_network",
+                    service_name,
+                    "auxiliary services must use an internal application network",
+                )
+
+        for mount in service.get("volumes", []):
+            target = mount["target"]
+            require_compatibility_control(
+                mount.get("read_only") is True,
+                policy,
+                used_exceptions,
+                "writable_volume",
+                service_name,
+                "writable named volume requires a target-scoped hardening exception",
+                target=target,
+            )
+
+    if not active_healthcheck(services[target_service]):
+        raise DeploymentError("the deployable service must define an active healthcheck")
+
+    configured_exceptions = {
+        (exception["control"], exception["service"], exception.get("target"))
+        for exception in policy["exceptions"]
+    }
+    if configured_exceptions != used_exceptions:
+        raise DeploymentError("hardening policy contains an unused exception")
 
 
 def validate_compose(rendered, app_name):
@@ -504,13 +789,17 @@ def validate_compose(rendered, app_name):
             if not isinstance(mount.get("source"), str) or mount.get("source") not in volumes:
                 raise DeploymentError("volume mount references an undeclared named volume")
             target = mount.get("target")
-            if not isinstance(target, str) or not target.startswith("/"):
-                raise DeploymentError("volume target must be an absolute container path")
+            validate_container_path(target, "volume target")
             if target in {"/", "/var/run/docker.sock", "/run/docker.sock"}:
                 raise DeploymentError("sensitive volume targets are forbidden")
             if "read_only" in mount and not isinstance(mount["read_only"], bool):
                 raise DeploymentError("volume read_only must be boolean")
             reject_unknown_keys(mount.get("volume", {}) or {}, MOUNT_VOLUME_KEYS, "volume options")
+
+
+def validate_deployment(rendered, config, deployment_image, hardening_policy):
+    validate_images(rendered, config, deployment_image)
+    validate_container_hardening(rendered, config, hardening_policy)
 
 
 def validate_images(rendered, config, deployment_image):
@@ -591,7 +880,7 @@ def health_check(url):
     return False
 
 
-def restore_previous(app_name, work_directory, config):
+def restore_previous(app_name, work_directory, config, hardening_policy):
     rollback_directory = work_directory / ".rollback"
     rollback_compose = rollback_directory / "compose.yaml"
     rollback_env = rollback_directory / ".env.deploy"
@@ -611,7 +900,7 @@ def restore_previous(app_name, work_directory, config):
         if not previous_image.startswith(f"{config['repository']}@"):
             raise DeploymentError("rollback digest is outside the authorized repository")
         rendered = render_compose(app_name, current_compose, current_env)
-        validate_images(rendered, config, previous_image)
+        validate_deployment(rendered, config, previous_image, hardening_policy)
         run_command(compose_command(app_name, current_compose, current_env, "up"), timeout=300)
         LOGGER.warning("stage=rollback_complete digest=%s", previous_image.rsplit("@", 1)[1])
         return
@@ -622,7 +911,7 @@ def restore_previous(app_name, work_directory, config):
 
 
 def deploy(app_name, commit_sha):
-    config, source_compose = load_application(app_name)
+    config, source_compose, hardening_policy = load_application(app_name)
     work_directory = WORK_ROOT / app_name
     work_directory.mkdir(mode=0o750, parents=False, exist_ok=True)
     os.chown(work_directory, 0, 0)
@@ -660,14 +949,14 @@ def deploy(app_name, commit_sha):
         placeholder_image = f"{config['repository']}@{placeholder_digest}"
         write_image_environment(candidate_env, placeholder_image)
         rendered = render_compose(app_name, candidate_compose, candidate_env)
-        validate_images(rendered, config, placeholder_image)
+        validate_deployment(rendered, config, placeholder_image, hardening_policy)
         LOGGER.info("app=%s commit=%s stage=validation_complete", app_name, commit_sha)
 
         deployment_image = resolve_digest(config["repository"], commit_sha)
         digest = deployment_image.rsplit("@", 1)[1]
         write_image_environment(candidate_env, deployment_image)
         rendered = render_compose(app_name, candidate_compose, candidate_env)
-        validate_images(rendered, config, deployment_image)
+        validate_deployment(rendered, config, deployment_image, hardening_policy)
         LOGGER.info("app=%s commit=%s stage=digest_resolved digest=%s", app_name, commit_sha, digest)
 
         LOGGER.info("app=%s commit=%s stage=pull_digest", app_name, commit_sha)
@@ -692,7 +981,7 @@ def deploy(app_name, commit_sha):
             if not health_check(config["health_url"]):
                 raise DeploymentError("the configured health check did not become healthy")
         except DeploymentError:
-            restore_previous(app_name, work_directory, config)
+            restore_previous(app_name, work_directory, config, hardening_policy)
             raise
 
         LOGGER.info(

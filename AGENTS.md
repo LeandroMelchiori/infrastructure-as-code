@@ -40,6 +40,8 @@ infrastructure-as-code/
         │   ├── README.md
         │   ├── app-config.example.json
         │   ├── compose.example.yml
+        │   ├── hardening.example.json
+        │   ├── tests/
         │   └── github-actions/
         │       └── deploy.yml.example
         └── proxy/
@@ -421,6 +423,20 @@ Validación fail-closed de Compose:
 - La imagen del servicio desplegable se construye en el servidor desde el repositorio allowlisted; el pipeline no proporciona una URI completa.
 - Las imágenes auxiliares deben estar permitidas localmente y fijadas por digest.
 - Nunca uses exclusivamente `latest`.
+
+Container Hardening obligatorio:
+
+- Exige `no-new-privileges`, `cap_drop: ALL`, límites positivos de CPU/memoria y healthcheck activo del servicio desplegable.
+- Exige por defecto UID numérico distinto de cero, root filesystem read-only y `/tmp` en tmpfs con `rw,noexec,nosuid,nodev`.
+- Sin `hardening.json` aplica el perfil `strict`, que no permite excepciones.
+- Solo root puede aprobar excepciones. Cada una debe indicar control, servicio, justificación de 20 a 500 caracteres y fecha de vencimiento; `writable_volume` también exige target exacto.
+- Solo son exceptuables `non_root_user`, `read_only_rootfs`, `secure_tmpfs`, `writable_volume`, `private_network` y `shared_proxy_network`.
+- Nunca permitas excepciones para `privileged`, Docker socket, bind mounts, host networking/PID/IPC, devices, `cap_add`, digest, healthcheck o límites CPU/memoria.
+- Named volumes son read-only por defecto. Los escribibles requieren excepción target-scoped y no pueden montar `/`, `/run/docker.sock` ni `/var/run/docker.sock`.
+- Solo la red root-managed `proxy` puede ser externa. Los auxiliares deben permanecer fuera de ella y usar redes internas salvo excepción explícita.
+- El mismo hardening debe validarse antes del primer pull, después de resolver el digest y durante rollback.
+- Policy as Code reporta compatibilidad como warning en dev y error en staging/prod; los controles críticos bloquean todos los perfiles.
+- La prohibición del Docker socket aplica a contenedores desplegados. El runner de build es otro dominio de confianza y debe ser dedicado, restringido y efímero cuando sea posible.
 
 Inmutabilidad, salud y rollback:
 

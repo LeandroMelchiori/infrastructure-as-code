@@ -959,6 +959,8 @@ docker-platform/
 │   ├── README.md
 │   ├── app-config.example.json
 │   ├── compose.example.yml
+│   ├── hardening.example.json
+│   ├── tests/
 │   └── github-actions/
 │       └── deploy.yml.example
 │
@@ -1467,6 +1469,22 @@ vuelve a validar. Tanto `compose pull` como `compose up` reciben exclusivamente
 Los logs incluyen aplicación, SHA, digest y etapa, pero no configuración,
 variables de entorno, URLs ni salidas que puedan contener secretos.
 
+### Baseline de Container Hardening
+
+La baseline obliga a usar `no-new-privileges`, `cap_drop: ALL`, UID numérico no
+root, root filesystem read-only, `/tmp` en tmpfs restringido, límites CPU/memoria
+y healthcheck Compose activo. Named volumes, redes y mounts permanecen bajo el
+esquema cerrado. Solo `proxy` puede ser una red externa; un auxiliar no debe
+compartirla cuando puede permanecer en una red interna de la aplicación.
+
+Las necesidades de compatibilidad se documentan en un `hardening.json`
+root-owned opcional, con control, servicio, justificación y vencimiento. El
+perfil implícito es `strict` y no permite excepciones. Ninguna excepción puede
+habilitar `privileged`, capabilities adicionales, Docker socket, namespaces del
+host, bind mounts, imágenes mutables, ausencia de healthcheck o recursos sin
+límites. En Policy as Code las desviaciones compatibles son warning en dev y
+bloqueantes en staging/prod; los controles críticos bloquean siempre.
+
 Consulta [`deployment/README.md`](deployment/README.md) para registrar una
 aplicación y preparar manualmente una VM existente.
 
@@ -1758,6 +1776,15 @@ de forma suficiente:
 - `IAC_ENV_003`: bloquea controles obligatorios desactivados en prod.
 - `IAC_ENV_101`: advierte si staging se aleja de los controles de prod.
 - `IAC_ENV_102`: reporta SSH público como warning únicamente en dev.
+- `IAC_CONTAINER_001`: bloquea en todos los entornos controles críticos como
+  privilegios adicionales, Docker socket, namespaces del host, imágenes
+  mutables, ausencia de healthcheck y falta de límites de CPU o memoria.
+- `IAC_CONTAINER_002`: bloquea en staging y prod desviaciones de la baseline
+  compatible, como root, filesystem escribible, `/tmp` inseguro o aislamiento
+  de red insuficiente.
+- `IAC_CONTAINER_101`: muestra esas desviaciones compatibles como warnings en
+  dev; el wrapper exige igualmente una excepción root-owned, justificada y con
+  vencimiento para poder desplegarlas.
 
 El resumen de GitHub Actions muestra únicamente regla, descripción y ubicación.
 No publica líneas de código, valores, coincidencias de secretos ni resultados

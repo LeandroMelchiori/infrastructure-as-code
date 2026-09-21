@@ -2,13 +2,23 @@ services:
   app:
     image: ${DEPLOY_IMAGE:?DEPLOY_IMAGE is required}
     restart: unless-stopped
+    user: "10001:10001"
     read_only: true
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
+    cpus: 0.50
+    mem_limit: 512m
+    pids_limit: 256
     tmpfs:
-      - /tmp
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     expose:
       - "8080"
     networks:
