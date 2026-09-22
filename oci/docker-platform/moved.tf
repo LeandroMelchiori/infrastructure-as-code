@@ -87,3 +87,18 @@ moved {
   from = oci_core_network_security_group_security_rule.egress
   to   = module.network.oci_core_network_security_group_security_rule.egress
 }
+
+moved {
+  from = oci_logging_log_group.platform
+  to   = module.logging.oci_logging_log_group.platform
+}
+
+moved {
+  from = oci_logging_log.platform
+  to   = module.logging.oci_logging_log.platform
+}
+
+moved {
+  from = oci_logging_unified_agent_configuration.platform
+  to   = module.logging.oci_logging_unified_agent_configuration.platform
+}

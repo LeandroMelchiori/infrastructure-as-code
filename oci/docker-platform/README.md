@@ -367,6 +367,10 @@ Cuando se habilita, Terraform crea:
 - una política IAM limitada a `use log-content` para el Dynamic Group de la
   instancia.
 
+Los recursos funcionales de Logging se administran mediante el módulo local
+`../modules/logging`. La política de ingestión y el Dynamic Group permanecen en
+el root porque IAM es una responsabilidad transversal de la plataforma.
+
 No se crean recursos ni permisos de logging mientras
 `logging_enabled = false`.
 

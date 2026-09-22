@@ -8,6 +8,7 @@ repositorio. No contienen providers configurados, backends ni credenciales.
 - `backup`: policy administrada y asignación de backup para un boot volume.
 - `storage`: bucket media y lifecycle policy opcional de Object Storage.
 - `network`: VCN, Internet Gateway, routing, security list, subnet pública, NSG y reglas.
+- `logging`: Log Group, logs personalizados y configuraciones del Unified Monitoring Agent.
 
 La modularización se realiza de forma incremental. Cada migración debe conservar
 los nombres remotos, añadir bloques `moved` en el root consumidor y comprobar los

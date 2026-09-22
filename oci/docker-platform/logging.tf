@@ -34,67 +34,21 @@ locals {
   } : {}
 }
 
-resource "oci_logging_log_group" "platform" {
-  count = var.logging_enabled ? 1 : 0
+module "logging" {
+  source = "../modules/logging"
 
-  compartment_id = var.compartment_ocid
-  display_name   = local.logging_log_group_name
-  description    = "Logs de infraestructura para ${var.project_name}"
-
-  freeform_tags = local.common_tags
-}
-
-resource "oci_logging_log" "platform" {
-  for_each = local.enabled_logging_sources
-
-  display_name       = "${var.project_name}-${each.key}"
-  log_group_id       = oci_logging_log_group.platform[0].id
-  log_type           = "CUSTOM"
-  is_enabled         = true
-  retention_duration = var.logging_retention_days
-
-  freeform_tags = merge(local.common_tags, {
-    LogSource = each.key
-  })
-}
-
-resource "oci_logging_unified_agent_configuration" "platform" {
-  for_each = local.enabled_logging_sources
-
-  compartment_id = var.compartment_ocid
-  display_name   = "${var.project_name}-${each.key}-logs"
-  description    = "Recolección de logs ${each.key} para ${var.project_name}"
-  is_enabled     = true
-
-  group_association {
-    group_list = [oci_identity_dynamic_group.server.id]
+  providers = {
+    oci = oci
   }
 
-  service_configuration {
-    configuration_type = "LOGGING"
-
-    destination {
-      log_object_id = oci_logging_log.platform[each.key].id
-    }
-
-    sources {
-      source_type = "LOG_TAIL"
-      name        = "${var.project_name}-${each.key}"
-      paths       = each.value.paths
-
-      advanced_options {
-        is_read_from_head = false
-      }
-
-      parser {
-        parser_type = each.value.parser_type
-      }
-    }
-  }
-
-  freeform_tags = merge(local.common_tags, {
-    LogSource = each.key
-  })
+  logging_enabled         = var.logging_enabled
+  compartment_ocid        = var.compartment_ocid
+  project_name            = var.project_name
+  log_group_name          = local.logging_log_group_name
+  logging_retention_days  = var.logging_retention_days
+  enabled_logging_sources = local.enabled_logging_sources
+  dynamic_group_id        = oci_identity_dynamic_group.server.id
+  common_tags             = local.common_tags
 
   depends_on = [oci_identity_policy.logging_ingestion]
 }
