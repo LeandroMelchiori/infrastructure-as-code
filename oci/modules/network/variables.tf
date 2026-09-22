@@ -18,6 +18,16 @@ variable "public_subnet_cidr" {
   type        = string
 }
 
+variable "ssh_source_cidr" {
+  description = "CIDR autorizado por el root para conexiones SSH"
+  type        = string
+}
+
+variable "public_web_ports" {
+  description = "Puertos web públicos indexados por nombre lógico"
+  type        = map(number)
+}
+
 variable "common_tags" {
   description = "Tags comunes aplicados a los recursos compatibles"
   type        = map(string)

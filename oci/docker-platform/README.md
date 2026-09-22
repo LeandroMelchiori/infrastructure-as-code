@@ -1811,8 +1811,8 @@ Ejemplo:
 ```json
 {
   "rule_id": "CKV2_IAC_OCI_2",
-  "path": "oci/docker-platform/security.tf",
-  "resource": "oci_core_network_security_group_security_rule.ssh",
+  "path": "oci/docker-platform",
+  "resource": "module.network.oci_core_network_security_group_security_rule.ssh",
   "owner": "platform",
   "reason": "Excepcion temporal asociada a un riesgo aceptado y documentado.",
   "expires_on": "2027-03-31"

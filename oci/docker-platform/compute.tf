@@ -32,7 +32,7 @@ resource "oci_core_instance" "server" {
     hostname_label = substr(replace(local.server_name, "-", ""), 0, 15)
 
     nsg_ids = [
-      oci_core_network_security_group.server.id
+      module.network.server_nsg_id
     ]
   }
 

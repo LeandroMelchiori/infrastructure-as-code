@@ -67,3 +67,23 @@ moved {
   from = oci_core_subnet.public
   to   = module.network.oci_core_subnet.public
 }
+
+moved {
+  from = oci_core_network_security_group.server
+  to   = module.network.oci_core_network_security_group.server
+}
+
+moved {
+  from = oci_core_network_security_group_security_rule.web
+  to   = module.network.oci_core_network_security_group_security_rule.web
+}
+
+moved {
+  from = oci_core_network_security_group_security_rule.ssh
+  to   = module.network.oci_core_network_security_group_security_rule.ssh
+}
+
+moved {
+  from = oci_core_network_security_group_security_rule.egress
+  to   = module.network.oci_core_network_security_group_security_rule.egress
+}
