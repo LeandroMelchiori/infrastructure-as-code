@@ -120,7 +120,7 @@ output "registry_namespace" {
 
 output "registry_repository_count" {
   description = "Cantidad de repositorios OCIR administrados por esta arquitectura"
-  value       = length(oci_artifacts_container_repository.platform)
+  value       = module.registry.registry_repository_count
 }
 
 output "registry_immutable" {
@@ -130,15 +130,12 @@ output "registry_immutable" {
 
 output "registry_repository_names" {
   description = "Nombres de los repositorios OCIR creados"
-  value       = sort(keys(oci_artifacts_container_repository.platform))
+  value       = module.registry.registry_repository_names
 }
 
 output "registry_repository_urls" {
   description = "URLs completas de los repositorios OCIR, indexadas por nombre"
-  value = {
-    for name, repository in oci_artifacts_container_repository.platform :
-    name => "${local.registry_domain}/${repository.namespace}/${repository.display_name}"
-  }
+  value       = module.registry.registry_repository_urls
 }
 
 output "deployment_enabled" {

@@ -483,6 +483,10 @@ por cada elemento de `registry_repository_names`. La cantidad se configura
 agregando o quitando nombres de ese conjunto; no existe una segunda variable de
 conteo que pueda quedar desincronizada.
 
+Los repositorios se administran mediante el módulo local `../modules/registry`.
+La policy de pull, el Dynamic Group, Compute y el namespace compartido
+permanecen en el root.
+
 ```hcl
 registry_enabled = true
 

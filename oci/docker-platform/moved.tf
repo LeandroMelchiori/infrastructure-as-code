@@ -102,3 +102,8 @@ moved {
   from = oci_logging_unified_agent_configuration.platform
   to   = module.logging.oci_logging_unified_agent_configuration.platform
 }
+
+moved {
+  from = oci_artifacts_container_repository.platform
+  to   = module.registry.oci_artifacts_container_repository.platform
+}

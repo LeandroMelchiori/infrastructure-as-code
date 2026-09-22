@@ -1,12 +1,18 @@
-resource "oci_artifacts_container_repository" "platform" {
-  for_each = var.registry_enabled ? var.registry_repository_names : toset([])
+module "registry" {
+  source = "../modules/registry"
 
-  compartment_id = var.compartment_ocid
-  display_name   = each.value
-  is_immutable   = var.registry_immutable
-  is_public      = var.registry_visibility == "PUBLIC"
+  providers = {
+    oci = oci
+  }
 
-  freeform_tags = merge(local.common_tags, var.registry_freeform_tags)
+  registry_enabled          = var.registry_enabled
+  compartment_ocid          = var.compartment_ocid
+  registry_repository_names = var.registry_repository_names
+  registry_visibility       = var.registry_visibility
+  registry_immutable        = var.registry_immutable
+  registry_freeform_tags    = var.registry_freeform_tags
+  common_tags               = local.common_tags
+  registry_domain           = local.registry_domain
 }
 
 resource "oci_identity_policy" "registry_pull" {
