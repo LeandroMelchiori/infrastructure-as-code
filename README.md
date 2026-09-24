@@ -11,6 +11,7 @@ Cada carpeta representa una infraestructura independiente y contiene su propia d
 | Proveedor | Infraestructura | Descripción | Estado |
 |---|---|---|---|
 | OCI | [Terraform State](./oci/terraform-state/) | Bucket privado y versionado para backends remotos de Terraform | Disponible |
+| OCI | [Application Storage](./oci/application-storage/) | Bucket privado y policy IAM minima para documentos de aplicaciones | Preparada |
 | OCI | [Docker Platform](./oci/docker-platform/) | Plataforma Docker reutilizable con networking, IAM, Vault, Traefik y bootstrap automatizado | Validada |
 | OCI | Kubernetes Platform | Plataforma basada en Kubernetes | Próximamente |
 | AWS | Container Platform | Arquitectura de contenedores en AWS | Próximamente |

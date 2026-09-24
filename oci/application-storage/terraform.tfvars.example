@@ -1,0 +1,21 @@
+# Identidad OCI. Reemplaza los placeholders en una copia local terraform.tfvars.
+tenancy_ocid     = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name = "REEMPLAZAR_COMPARTMENT"
+project_name     = "example-app"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "APIKey"
+oci_config_file_profile = "DEFAULT"
+
+# Object Storage privado para documentos originales y paquetes JSON.
+bucket_name = "REEMPLAZAR_BUCKET_UNICO"
+
+# El grupo y sus usuarios deben existir antes de terraform apply.
+# Terraform no crea usuarios, API keys ni claves privadas.
+iam_group_name = "example-app-object-storage-users"
+
+# Controles conservadores del MVP.
+object_storage_versioning = false
+allow_object_overwrite    = false
+freeform_tags             = {}

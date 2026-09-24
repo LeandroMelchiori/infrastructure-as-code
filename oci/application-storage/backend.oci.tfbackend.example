@@ -1,0 +1,14 @@
+# Copia como backend.oci.tfbackend y completa valores no versionados.
+# Este bucket es el dedicado a Terraform State, no el bucket de la aplicacion.
+
+bucket    = "REEMPLAZAR_BUCKET_TERRAFORM_STATE"
+namespace = "REEMPLAZAR_NAMESPACE"
+key       = "application-storage/terraform.tfstate"
+region    = "sa-saopaulo-1"
+
+# Runner OCI con Instance Principal:
+# auth = "InstancePrincipal"
+
+# OCI Cloud Shell o sesion local autenticada:
+# auth                = "SecurityToken"
+# config_file_profile = "TERRAFORM"
