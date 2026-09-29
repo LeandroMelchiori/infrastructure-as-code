@@ -550,6 +550,7 @@ def environment_profile_findings(
         )
 
     required_controls = {
+        "https_enabled": variables.get("https_enabled") is True,
         "monitoring_enabled": variables.get("monitoring_enabled") is True,
         "logging_enabled": variables.get("logging_enabled") is True,
         "backup_enabled": variables.get("backup_enabled") is True,
@@ -557,6 +558,15 @@ def environment_profile_findings(
         "registry_immutable": variables.get("registry_immutable") is True,
         "object_storage_versioning": variables.get("object_storage_versioning") is True,
     }
+    if environment == "dev" and not required_controls["https_enabled"]:
+        add(
+            "warning",
+            ENVIRONMENT_DEV_RULE,
+            "Plain HTTP is accepted only as a documented temporary dev configuration",
+            tfvars_path,
+            "var.https_enabled",
+        )
+
     if environment in {"staging", "prod"}:
         for control, enabled in required_controls.items():
             if enabled:

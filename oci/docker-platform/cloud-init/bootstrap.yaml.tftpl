@@ -61,17 +61,25 @@ runcmd:
 
   - firewall-cmd --permanent --add-service=ssh
   - firewall-cmd --permanent --add-service=http
+%{ if https_enabled ~}
   - firewall-cmd --permanent --add-service=https
+%{ endif ~}
   - firewall-cmd --reload
 
+%{ if https_enabled ~}
   - mkdir -p /opt/apps/proxy/letsencrypt
+%{ else ~}
+  - mkdir -p /opt/apps/proxy
+%{ endif ~}
   - mkdir -p /opt/apps/shared
   - mkdir -p /opt/apps/apps
 
   - mv /tmp/traefik-compose.yml /opt/apps/proxy/docker-compose.yml
 
+%{ if https_enabled ~}
   - touch /opt/apps/proxy/letsencrypt/acme.json
   - chmod 600 /opt/apps/proxy/letsencrypt/acme.json
+%{ endif ~}
 
   - chown -R opc:opc /opt/apps
 %{ if deployment_enabled ~}

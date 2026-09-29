@@ -11,6 +11,8 @@ services:
     cpus: 0.50
     mem_limit: 512m
     pids_limit: 256
+    environment:
+      PROVIDER_API_KEY: ${PROVIDER_API_KEY:?PROVIDER_API_KEY is required}
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m
     healthcheck:

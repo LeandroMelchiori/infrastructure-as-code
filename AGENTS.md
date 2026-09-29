@@ -8,6 +8,7 @@ Este repositorio documenta y versiona plantillas de infraestructura reutilizable
 
 Las infraestructuras actualmente implementadas son:
 
+- `oci/platform-bootstrap`: bootstrap independiente para crear el compartment de plataforma y su bucket privado de Terraform State.
 - `oci/terraform-state`: bootstrap independiente para un bucket privado y versionado dedicado al estado remoto de Terraform.
 - `oci/docker-platform`: plataforma Docker sobre Oracle Cloud Infrastructure con networking, Compute, Docker/Compose, Traefik, Vault/KMS, Object Storage, Monitoring/Notifications, backups, Logging, OCIR y base restringida para CI/CD de aplicaciones.
 
@@ -20,6 +21,10 @@ infrastructure-as-code/
 ├── .gitignore
 └── oci/
     ├── terraform-state/
+    │   ├── README.md
+    │   ├── *.tf
+    │   └── terraform.tfvars.example
+    ├── platform-bootstrap/
     │   ├── README.md
     │   ├── *.tf
     │   └── terraform.tfvars.example
@@ -119,8 +124,9 @@ terraform init -reconfigure \
 terraform plan -var-file=environments/ENTORNO/terraform.tfvars
 ```
 
-Para el bootstrap del bucket trabaja desde `oci/terraform-state` y utiliza
-`terraform init` sin backend remoto.
+Para el bootstrap trabaja desde `oci/terraform-state` cuando el compartment ya
+existe, o desde `oci/platform-bootstrap` cuando tambien debe crearse. En ambos
+casos utiliza `terraform init` sin backend remoto.
 
 Requisitos actuales:
 
@@ -133,6 +139,10 @@ Requisitos actuales:
 las demás configuraciones puedan inicializar su backend. Conserva su propio state
 local, que debe tratarse como un archivo sensible y respaldarse fuera de Git.
 
+`oci/platform-bootstrap` cumple el mismo rol cuando tambien debe crearse el
+compartment. Su state local contiene tanto el compartment como el bucket y no
+debe migrarse al backend que el propio stack administra.
+
 Antes de entregar cambios en Terraform:
 
 - Ejecuta `terraform fmt -check -recursive` en la raíz del módulo modificado.
@@ -144,12 +154,12 @@ Antes de entregar cambios en Terraform:
 ## Remote State
 
 - Mantén cada arquitectura Terraform independiente, con su propio backend, variables y ciclo de vida.
-- El state remoto de `oci/docker-platform` debe vivir en el bucket dedicado creado por `oci/terraform-state`.
+- El state remoto de `oci/docker-platform` debe vivir en el bucket dedicado creado por `oci/terraform-state` u `oci/platform-bootstrap`.
 - Nunca mezcles Terraform State con el bucket `media`, logs, backups, imágenes OCIR ni artefactos de deployment.
 - No agregues credenciales al bloque `backend`, a `backend.oci.tfbackend.example` ni a Git.
 - Conserva compatibilidad con OCI Cloud Shell y autenticación `SecurityToken`/perfiles OCI cuando corresponda.
 - Documenta la migración desde state local mediante `terraform init -migrate-state` y exige detener ejecuciones concurrentes antes de migrar.
-- El bootstrap `oci/terraform-state` conserva state local; trátalo como sensible y mantenlo fuera de Git.
+- Los bootstrap `oci/terraform-state` y `oci/platform-bootstrap` conservan state local; trátalo como sensible y mantenlo fuera de Git.
 - No cambies backend y recursos de aplicación en la misma operación sin una razón explícita.
 - `dev`, `staging` y `prod` deben usar claves de state distintas. Nunca copies ni reutilices state entre entornos.
 - No uses Terraform Workspaces como mecanismo principal de separación.
@@ -162,8 +172,9 @@ Antes de entregar cambios en Terraform:
 - Mantén un único conjunto de archivos `.tf`; las diferencias viven en `environments/dev`, `environments/staging` y `environments/prod`.
 - Solo versiona archivos `.example`. Los `terraform.tfvars` y `backend.oci.tfbackend` reales permanecen ignorados en cualquier entorno.
 - DEV prioriza bajo costo y puede desactivar capacidades opcionales. SSH público solo puede tratarse como warning en este perfil.
+- HTTP sin TLS sólo puede utilizarse temporalmente en DEV y debe aparecer como warning de Policy as Code.
 - STAGING debe aproximarse a prod. SSH público es bloqueante y los controles operativos desactivados deben generar advertencias visibles.
-- PROD exige monitoring, logging, backups, registry privado e inmutable, Object Storage privado con versionado y SSH restringido.
+- PROD exige monitoring, logging, backups, registry privado e inmutable, Object Storage privado con versionado, HTTPS y SSH restringido.
 - Terraform CI y Policy as Code validan los tres perfiles en pull requests. Las ejecuciones manuales exigen selección explícita.
 - Drift Detection usa rutas root-owned independientes bajo `/etc/terraform/oci/docker-platform/<environment>/` y comprueba que `environment_name` y la clave del backend coincidan.
 - Los workflows que consultan OCI deben usar GitHub Environments separados: `infrastructure-dev`, `infrastructure-staging` e `infrastructure-prod`.
@@ -239,7 +250,7 @@ La carpeta `oci/docker-platform` define:
 - `cloud-init/bootstrap.yaml.tftpl`: instalación de Docker, OCI CLI, firewalld, estructura `/opt/apps`, helpers opcionales y arranque de Traefik.
 - `cloud-init/deploy-compose-app.py`: wrapper privilegiado y fail-closed para deployments por digest.
 - `deployment/`: documentación, ejemplos root-owned y workflow genérico de aplicaciones.
-- `proxy/docker-compose.yml.tftpl`: Traefik con Docker provider, red externa `proxy`, HTTP->HTTPS y Let's Encrypt HTTP-01.
+- `proxy/docker-compose.yml.tftpl`: Traefik con Docker provider y red externa `proxy`; HTTPS, redirección y Let's Encrypt HTTP-01 son configurables y obligatorios en prod.
 
 ## Bootstrap y servidor
 
@@ -268,6 +279,7 @@ Variables requeridas o de alto impacto:
 - `project_name`
 - `oci_auth`
 - `oci_config_file_profile`
+- `https_enabled`
 - `acme_email`
 - `ssh_public_key_path`
 - `ssh_source_cidr`
@@ -283,6 +295,7 @@ Variables requeridas o de alto impacto:
 - `object_storage_archive_after_days`
 - `object_storage_delete_previous_versions_after_days`
 - `object_storage_abort_multipart_uploads_after_days`
+- `external_object_storage_buckets`
 - `backup_enabled`
 - `backup_frequency`
 - `backup_type`
@@ -321,14 +334,21 @@ Si agregas variables:
 
 La instancia usa Instance Principal mediante Dynamic Group. No agregues credenciales OCI estáticas al servidor, a contenedores ni a ejemplos.
 
-El bucket de Terraform State pertenece a `oci/terraform-state`; no concedas acceso
-a ese bucket al Dynamic Group del servidor ni lo combines con el bucket `media`.
+El bucket de Terraform State pertenece a `oci/terraform-state` o
+`oci/platform-bootstrap`; no concedas acceso a ese bucket al Dynamic Group del
+servidor ni lo combines con el bucket `media`.
 
 La policy actual permite:
 
 - leer `secret-bundles` en el compartment configurado;
 - leer el bucket de medios;
 - gestionar objetos dentro del bucket de medios.
+
+`external_object_storage_buckets` puede crear una policy separada para buckets
+existentes en otros compartments. Debe permanecer vacío por defecto, limitarse al
+OCID del compartment y al nombre exacto del bucket, y usar únicamente los perfiles
+cerrados `READ`, `WRITE_ONCE` o `READ_WRITE`. Ningún perfil puede conceder borrado
+de objetos ni acceso al bucket de Terraform State.
 
 Si modificas permisos, mantén el alcance mínimo necesario y prefiere condiciones por nombre de bucket u otro criterio específico cuando sea posible.
 
@@ -410,6 +430,8 @@ Contrato del wrapper privilegiado:
 - `<commit-sha>` debe ser un SHA Git completo de 40 caracteres hexadecimales minúsculos.
 - Repositorio, servicio, Compose, health check e imágenes auxiliares viven bajo `/etc/docker-platform/apps/<app>` y son controlados por root.
 - Wrapper, configuración y Compose deben ser `root:root`, no escribibles por `ocarun` ni usuarios no privilegiados.
+- Los secretos runtime sólo pueden provenir de un archivo root-owned allowlisted por basename en la configuración local. El pipeline no puede elegir su ruta, contenido ni variables.
+- Reserva `DEPLOY_IMAGE` al wrapper, valida el archivo runtime con un esquema cerrado y nunca registres valores, entornos normalizados ni salida de comandos que pueda contenerlos.
 - Rechaza symlinks, archivos no regulares, paths fuera de los roots autorizados y directorios group/world-writable.
 - `ocarun` no debe pertenecer al grupo `docker` ni recibir `NOPASSWD:ALL`; sudoers solo autoriza el wrapper root-owned.
 - El wrapper usa APIs estructuradas, argumentos de subprocess en listas y nunca `shell=True`, `eval` ni comandos construidos por el pipeline.

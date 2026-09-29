@@ -828,11 +828,33 @@ La infraestructura utiliza el desafío:
 HTTP-01
 ```
 
-El correo utilizado para ACME se configura mediante:
+HTTPS permanece habilitado por defecto. El correo utilizado para ACME se
+configura mediante:
 
 ```hcl
-acme_email = "correo@example.com"
+https_enabled = true
+acme_email    = "correo@example.com"
 ```
+
+Para una demo temporal sin dominio puede exponerse una única aplicación por la
+IP pública usando HTTP:
+
+```hcl
+https_enabled = false
+acme_email    = null
+```
+
+En una instancia ya existente, cambiar `https_enabled` no reconfigura Traefik:
+`metadata.user_data` está ignorado deliberadamente para no reemplazar Compute.
+El modo elegido se aplica durante el bootstrap de una instancia nueva; una VM ya
+creada requiere una actualización administrativa controlada de la configuración.
+
+En este modo Traefik sólo publica el puerto `80`: no configura el entrypoint
+`websecure`, redirección a HTTPS, ACME, el puerto `443` ni su regla NSG. El
+Compose root-owned de la aplicación debe usar el entrypoint `web` y una regla
+controlada como ``PathPrefix(`/`)`` únicamente cuando sea la única aplicación
+expuesta. El tráfico no está cifrado, Policy as Code lo reporta como warning en
+`dev` y este modo no está permitido para `prod`.
 
 Los certificados se almacenan en:
 
@@ -1007,6 +1029,7 @@ ocpus
 memory_in_gbs
 boot_volume_size_in_gbs
 image_ocid
+https_enabled
 acme_email
 traefik_image
 media_bucket_name
@@ -1016,6 +1039,7 @@ object_storage_lifecycle_enabled
 object_storage_archive_after_days
 object_storage_delete_previous_versions_after_days
 object_storage_abort_multipart_uploads_after_days
+external_object_storage_buckets
 backup_enabled
 backup_frequency
 backup_type
@@ -1136,7 +1160,7 @@ inicializarlo y comprobar la línea `key`.
 - STAGING debe parecerse a prod. SSH público se bloquea y los controles
   operativos desactivados generan advertencias de Policy as Code.
 - PROD bloquea SSH público y exige monitoring, logging, backups, registry privado
-  e inmutable y Object Storage privado con versionado.
+  e inmutable, Object Storage privado con versionado y HTTPS.
 
 `environment_name` es obligatorio y no tiene valor por defecto. Terraform valida
 los controles mínimos de prod antes de planificar. Policy as Code valida además
@@ -1354,6 +1378,8 @@ Entre los outputs disponibles se encuentran:
 ```text
 server_id
 server_public_ip
+https_enabled
+public_endpoint_scheme
 server_private_ip
 vcn_id
 subnet_id
@@ -1363,6 +1389,8 @@ media_bucket_name
 media_bucket_access_type
 media_bucket_versioning
 object_storage_lifecycle_policy_id
+external_object_storage_policy_id
+external_object_storage_grants
 backup_enabled
 boot_volume_id
 boot_volume_backup_policy_id
@@ -1472,6 +1500,13 @@ El wrapper exige exactamente esos dos argumentos. El repositorio, Compose,
 servicio, health check e imágenes auxiliares están definidos en archivos
 `root:root` bajo `/etc/docker-platform/apps/<app>`. `ocarun` no pertenece al
 grupo Docker y no puede escribir la configuración ni `/opt/apps/apps`.
+
+Cuando una aplicación necesita secretos, `deployment.json` puede señalar un
+basename `runtime.env` ubicado en el mismo directorio root-owned y con modo
+`0600`. El wrapper valida un formato `KEY=VALUE` restringido, reserva
+`DEPLOY_IMAGE` para la referencia por digest y crea el entorno operativo sin
+imprimir valores. El workflow no puede seleccionar el archivo ni proporcionar
+variables. Los secretos reales no se almacenan en Git ni en Terraform.
 
 Antes de cualquier pull o `compose up`, el wrapper normaliza y valida el Compose
 contra un esquema cerrado. Rechaza campos desconocidos, symlinks, bind mounts,
@@ -2035,3 +2070,47 @@ Object Storage
 Por este motivo no es necesario almacenar credenciales OCI dentro de los contenedores.
 
 El backend puede utilizar OCI SDK u OCI CLI para subir, consultar y eliminar objetos.
+
+### Acceso a buckets externos
+
+La plataforma puede autorizar al mismo Instance Principal a trabajar con buckets
+existentes en otros compartments sin importarlos ni administrarlos desde este
+state. La capacidad es opcional y no crea ningún permiso cuando el map está vacío:
+
+```hcl
+external_object_storage_buckets = {}
+```
+
+Cada entrada identifica exactamente el OCID del compartment, el nombre del bucket
+y uno de los perfiles de acceso cerrados:
+
+| Perfil | Permisos sobre objetos |
+| --- | --- |
+| `READ` | inspeccionar y leer |
+| `WRITE_ONCE` | crear objetos nuevos |
+| `READ_WRITE` | inspeccionar, leer, crear y sobrescribir |
+
+Ningún perfil permite borrar objetos. `WRITE_ONCE` tampoco permite leer ni
+sobrescribir. Por ejemplo:
+
+```hcl
+external_object_storage_buckets = {
+  educational_content = {
+    compartment_ocid = "ocid1.compartment.oc1..replace_me"
+    bucket_name      = "example-educational-content"
+    access           = "READ_WRITE"
+  }
+}
+```
+
+Terraform crea una policy opcional en el tenancy con condiciones por
+`target.bucket.name`, `compartment id` y `request.permission`. El bucket continúa
+bajo la responsabilidad de su propio stack: este módulo no cambia su visibilidad,
+versionado, lifecycle, cifrado ni contenido. Tampoco concede acceso al bucket de
+Terraform State ni requiere claves OCI en la VM o en los contenedores.
+
+La identidad que ejecuta Terraform necesita permiso para administrar policies en
+el tenancy. Quitar una entrada revoca el acceso correspondiente; por eso debe
+revisarse el plan antes de aplicar. Consulta la
+[referencia oficial de policies de Object Storage](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/objectstoragepolicyreference.htm)
+para los permisos efectivos.

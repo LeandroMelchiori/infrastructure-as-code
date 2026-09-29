@@ -10,6 +10,7 @@ Cada carpeta representa una infraestructura independiente y contiene su propia d
 
 | Proveedor | Infraestructura | Descripción | Estado |
 |---|---|---|---|
+| OCI | [Platform Bootstrap](./oci/platform-bootstrap/) | Compartment de plataforma y bucket privado para Terraform State | Preparada |
 | OCI | [Terraform State](./oci/terraform-state/) | Bucket privado y versionado para backends remotos de Terraform | Disponible |
 | OCI | [Application Storage](./oci/application-storage/) | Bucket privado y policy IAM minima para documentos de aplicaciones | Preparada |
 | OCI | [Docker Platform](./oci/docker-platform/) | Plataforma Docker reutilizable con networking, IAM, Vault, Traefik y bootstrap automatizado | Validada |
@@ -40,10 +41,19 @@ infrastructure-as-code/
 ├── .gitignore
 │
 ├── oci/
+│   ├── platform-bootstrap/
+│   │   ├── README.md
+│   │   ├── *.tf
+│   │   └── terraform.tfvars.example
+│   │
 │   ├── terraform-state/
 │   │   ├── README.md
 │   │   ├── *.tf
 │   │   └── terraform.tfvars.example
+│   │
+│   ├── application-storage/
+│   │   ├── README.md
+│   │   └── *.tf
 │   │
 │   └── docker-platform/
 │       ├── README.md
@@ -68,8 +78,15 @@ infrastructure-as-code/
 Cada arquitectura Terraform mantiene su propio state. `oci/docker-platform` usa
 una configuración común con backends y claves independientes para `dev`,
 `staging` y `prod`; no usa Workspaces como mecanismo principal. El bucket de
-state se crea por separado mediante [`oci/terraform-state`](./oci/terraform-state/)
-y nunca se reutiliza como bucket de archivos de aplicaciones.
+state se crea por separado y nunca se reutiliza como bucket de archivos de
+aplicaciones. Puede crearse con
+[`oci/terraform-state`](./oci/terraform-state/) cuando el compartment ya existe,
+o con [`oci/platform-bootstrap`](./oci/platform-bootstrap/) cuando tambien debe
+crearse el compartment.
+
+Cuando el compartment de plataforma aun no existe, `oci/platform-bootstrap`
+puede crear en una sola etapa bootstrap tanto el compartment como el bucket de
+state. Al igual que `oci/terraform-state`, conserva state local deliberadamente.
 
 La configuración del backend y las credenciales son locales. Los archivos
 `*.tfbackend`, `terraform.tfvars`, `.terraform/` y `*.tfstate*` están excluidos de

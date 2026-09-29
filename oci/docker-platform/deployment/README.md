@@ -31,20 +31,46 @@ workflow. Un administrador debe crear:
 /etc/docker-platform/apps/<app>/deployment.json
 /etc/docker-platform/apps/<app>/compose.yaml
 /etc/docker-platform/apps/<app>/hardening.json  # opcional; root-owned
+/etc/docker-platform/apps/<app>/runtime.env     # opcional; root-owned y 0600
 ```
 
 Usa `app-config.example.json`, `compose.example.yml` y
-`hardening.example.json` como referencia. Instala
+`hardening.example.json` como referencia. `runtime.env.example` documenta el
+formato pero no debe copiarse con valores reales al repositorio. Instala
 directorios con modo `0750`, archivos con modo `0640` y propietario
-`root:root`. No se admiten symlinks ni rutas configurables.
+`root:root`; `runtime.env` debe usar modo `0600`. No se admiten symlinks ni
+rutas configurables.
 
-`deployment.json` tiene un esquema cerrado con cinco campos:
+`deployment.json` tiene un esquema cerrado con cinco campos requeridos y uno
+opcional:
 
 - `repository`: URI completa y sin tag de un repositorio OCIR permitido.
 - `service`: servicio de Compose cuya imagen usa `DEPLOY_IMAGE`.
 - `compose_file`: nombre simple del archivo local.
 - `health_url`: URL fija sin credenciales, query ni fragmento.
 - `allowed_images`: imágenes auxiliares OCIR fijadas por digest.
+- `runtime_env_file`: basename opcional de un archivo root-owned dentro del
+  directorio de la aplicación.
+
+El archivo runtime acepta como máximo 128 entradas `KEY=VALUE`, con claves en
+mayúsculas y valores ASCII simples. Rechaza rutas, claves duplicadas, expansión
+con `$`, quoting, backticks, barras invertidas y la clave reservada
+`DEPLOY_IMAGE`. El wrapper genera esa última clave exclusivamente desde el
+digest autorizado. Los valores se copian a estado operativo `root:root` con
+modo `0600` para que Compose pueda recrear o revertir el servicio sin exponerlos
+al pipeline.
+
+El Compose debe enumerar explícitamente qué variables recibe el contenedor:
+
+```yaml
+environment:
+  PROVIDER_API_KEY: ${PROVIDER_API_KEY:?PROVIDER_API_KEY is required}
+```
+
+El wrapper nunca registra el contenido del archivo, el entorno normalizado ni
+stdout/stderr de Compose. Aun así, root y el daemon Docker pueden inspeccionar
+las variables del contenedor; usa una identidad y un secreto distintos por
+aplicación y rota cualquier valor comprometido.
 
 La configuración Compose soportada es deliberadamente pequeña. No admite
 `build`, ports publicados, bind mounts, secrets/configs de Compose, devices,

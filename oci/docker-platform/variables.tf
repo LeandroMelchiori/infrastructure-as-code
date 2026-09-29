@@ -90,9 +90,28 @@ variable "image_ocid" {
   default     = null
 }
 
+variable "https_enabled" {
+  description = "Habilita HTTPS, redirección desde HTTP y certificados Let's Encrypt"
+  type        = bool
+  default     = true
+}
+
 variable "acme_email" {
-  description = "Email utilizado por Let's Encrypt"
+  description = "Email utilizado por Let's Encrypt; puede ser null cuando HTTPS está deshabilitado"
   type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = (
+      !var.https_enabled ||
+      (
+        var.acme_email != null &&
+        can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.acme_email))
+      )
+    )
+    error_message = "acme_email debe contener un email válido cuando https_enabled es true."
+  }
 }
 
 variable "traefik_image" {
@@ -196,6 +215,61 @@ variable "object_storage_abort_multipart_uploads_after_days" {
       )
     )
     error_message = "object_storage_abort_multipart_uploads_after_days debe ser null o un entero mayor o igual que 1."
+  }
+}
+
+variable "external_object_storage_buckets" {
+  description = "Buckets existentes fuera del compartment de plataforma a los que Compute accede mediante Instance Principal"
+  type = map(object({
+    compartment_ocid = string
+    bucket_name      = string
+    access           = string
+  }))
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.external_object_storage_buckets) :
+      can(regex("^[a-z][a-z0-9_-]{0,63}$", name))
+    ])
+    error_message = "Las claves de external_object_storage_buckets deben comenzar con una letra minúscula y contener sólo letras minúsculas, números, guiones o guiones bajos."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      can(regex("^ocid1\\.compartment\\.", trimspace(grant.compartment_ocid)))
+    ])
+    error_message = "Cada compartment_ocid de external_object_storage_buckets debe ser un OCID de compartment válido."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      length(trimspace(grant.bucket_name)) >= 1 &&
+      length(trimspace(grant.bucket_name)) <= 256 &&
+      !strcontains(grant.bucket_name, "'") &&
+      !strcontains(grant.bucket_name, "\n") &&
+      !strcontains(grant.bucket_name, "\r")
+    ])
+    error_message = "Cada bucket_name debe tener entre 1 y 256 caracteres y no puede contener comillas simples ni saltos de línea."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      contains(["READ", "WRITE_ONCE", "READ_WRITE"], grant.access)
+    ])
+    error_message = "El acceso a buckets externos debe ser READ, WRITE_ONCE o READ_WRITE."
+  }
+
+  validation {
+    condition = length(distinct([
+      for grant in values(var.external_object_storage_buckets) :
+      "${lower(trimspace(grant.compartment_ocid))}/${lower(trimspace(grant.bucket_name))}"
+    ])) == length(var.external_object_storage_buckets)
+    error_message = "No se puede declarar dos veces el mismo bucket externo dentro del mismo compartment."
   }
 }
 

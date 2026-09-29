@@ -26,10 +26,11 @@ variable "environment_name" {
         var.registry_visibility == "PRIVATE" &&
         var.registry_immutable == true &&
         var.object_storage_access_type == "NoPublicAccess" &&
-        var.object_storage_versioning
+        var.object_storage_versioning &&
+        var.https_enabled
       )
     )
-    error_message = "prod requiere monitoring, logging, backups, registry privado e inmutable y Object Storage privado con versionado."
+    error_message = "prod requiere monitoring, logging, backups, registry privado e inmutable, Object Storage privado con versionado y HTTPS."
   }
 }
 

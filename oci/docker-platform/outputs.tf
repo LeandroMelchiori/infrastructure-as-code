@@ -8,6 +8,16 @@ output "server_public_ip" {
   value       = oci_core_public_ip.server.ip_address
 }
 
+output "https_enabled" {
+  description = "Indica si Traefik publica HTTPS y gestiona certificados ACME"
+  value       = var.https_enabled
+}
+
+output "public_endpoint_scheme" {
+  description = "Esquema esperado para acceder a las aplicaciones"
+  value       = var.https_enabled ? "https" : "http"
+}
+
 output "server_private_ip" {
   description = "IP privada del servidor"
   value       = data.oci_core_private_ips.server.private_ips[0].ip_address
@@ -56,6 +66,22 @@ output "media_bucket_versioning" {
 output "object_storage_lifecycle_policy_id" {
   description = "ID de la política lifecycle del bucket media, o null si está deshabilitada"
   value       = module.storage.object_storage_lifecycle_policy_id
+}
+
+output "external_object_storage_policy_id" {
+  description = "OCID de la policy para buckets externos, o null si no hay accesos configurados"
+  value       = try(oci_identity_policy.server_external_object_storage[0].id, null)
+}
+
+output "external_object_storage_grants" {
+  description = "Accesos declarados para buckets externos, sin credenciales"
+  value = {
+    for name, grant in var.external_object_storage_buckets : name => {
+      compartment_ocid = grant.compartment_ocid
+      bucket_name      = grant.bucket_name
+      access           = grant.access
+    }
+  }
 }
 
 output "backup_enabled" {

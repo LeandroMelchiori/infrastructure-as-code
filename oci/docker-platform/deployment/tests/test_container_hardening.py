@@ -1,5 +1,6 @@
 import copy
 import importlib.util
+import stat
 import sys
 import types
 import unittest
@@ -146,6 +147,37 @@ class ContainerHardeningTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(WRAPPER.DeploymentError, "control is invalid"):
             WRAPPER.validate_hardening_policy(policy)
+
+    def test_runtime_environment_is_normalized_without_logging_values(self):
+        content = "# root-owned runtime values\nPROVIDER_API_KEY=abc-123_XYZ\nMODEL_NAME=model:v1\n"
+        self.assertEqual(
+            WRAPPER.normalize_runtime_environment(content),
+            "PROVIDER_API_KEY=abc-123_XYZ\nMODEL_NAME=model:v1\n",
+        )
+
+    def test_runtime_environment_rejects_reserved_and_interpolated_values(self):
+        with self.assertRaisesRegex(WRAPPER.DeploymentError, "reserved key"):
+            WRAPPER.normalize_runtime_environment("DEPLOY_IMAGE=unexpected\n")
+        with self.assertRaisesRegex(WRAPPER.DeploymentError, "unsafe value"):
+            WRAPPER.normalize_runtime_environment("PROVIDER_API_KEY=${UNTRUSTED}\n")
+
+    def test_runtime_environment_rejects_paths_and_duplicate_keys(self):
+        with self.assertRaisesRegex(WRAPPER.DeploymentError, "simple file name"):
+            WRAPPER.validate_runtime_env_file_name("../runtime.env")
+        with self.assertRaisesRegex(WRAPPER.DeploymentError, "duplicate key"):
+            WRAPPER.normalize_runtime_environment("TOKEN=first\nTOKEN=second\n")
+
+    def test_deployment_image_is_read_without_exposing_runtime_values(self):
+        environment = f"PROVIDER_API_KEY=hidden\nDEPLOY_IMAGE={IMAGE}\n"
+        self.assertEqual(WRAPPER.read_deployment_image(environment), IMAGE)
+
+    def test_runtime_environment_rejects_group_or_world_permissions(self):
+        metadata = types.SimpleNamespace(st_size=100, st_mode=stat.S_IFREG | 0o640)
+        with self.assertRaisesRegex(WRAPPER.DeploymentError, "group/world"):
+            WRAPPER.validate_runtime_env_metadata(metadata)
+
+        metadata.st_mode = stat.S_IFREG | 0o600
+        WRAPPER.validate_runtime_env_metadata(metadata)
 
 
 if __name__ == "__main__":
