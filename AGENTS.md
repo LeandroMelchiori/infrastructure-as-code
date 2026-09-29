@@ -130,7 +130,7 @@ casos utiliza `terraform init` sin backend remoto.
 
 Requisitos actuales:
 
-- Terraform `>= 1.12.0`
+- Terraform `>= 1.5.7` y `< 2.0.0`
 - Provider `oracle/oci` versión `8.29.0`
 - Autenticación OCI por defecto: `InstancePrincipal`
 - Región por defecto: `sa-saopaulo-1`

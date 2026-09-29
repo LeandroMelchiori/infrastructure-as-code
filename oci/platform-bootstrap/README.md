@@ -41,11 +41,14 @@ El bootstrap no crea grupos, usuarios, API keys ni policies IAM amplias.
 ```bash
 cd oci/platform-bootstrap
 cp terraform.tfvars.example terraform.tfvars
-oci session authenticate --profile-name TERRAFORM
 ```
 
 Completa `terraform.tfvars` con el OCID del padre y un nombre de bucket unico.
 El archivo real esta ignorado y no debe incluir claves, tokens ni contrasenas.
+Cloud Shell ya proporciona autenticacion OCI; usa `InstancePrincipal` y no
+ejecutes el callback de navegador de `oci session authenticate` desde la shell
+remota. Para una ejecucion local fuera de OCI puede utilizarse un perfil temporal
+`SecurityToken`.
 
 ## Validar y revisar
 

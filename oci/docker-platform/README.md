@@ -1264,7 +1264,7 @@ no debe almacenarse en Git.
 ## Inicialización
 
 Esta arquitectura utiliza el backend nativo de OCI, disponible desde Terraform
-1.12.0. Primero crea el bucket dedicado mediante
+1.5.7. Primero crea el bucket dedicado mediante
 [`../terraform-state`](../terraform-state/) y consulta sus outputs.
 
 Crea la configuración local del backend:
@@ -1296,7 +1296,7 @@ terraform init -backend-config=environments/dev/backend.oci.tfbackend
 ## OCI Cloud Shell
 
 Cloud Shell incluye Terraform y OCI CLI. Comprueba primero que la versión sea
-1.12.0 o posterior:
+1.5.7 o posterior:
 
 ```bash
 terraform version

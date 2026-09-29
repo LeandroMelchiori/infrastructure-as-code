@@ -102,16 +102,6 @@ variable "acme_email" {
   default     = null
   nullable    = true
 
-  validation {
-    condition = (
-      !var.https_enabled ||
-      (
-        var.acme_email != null &&
-        can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.acme_email))
-      )
-    )
-    error_message = "acme_email debe contener un email válido cuando https_enabled es true."
-  }
 }
 
 variable "traefik_image" {
@@ -153,24 +143,6 @@ variable "object_storage_lifecycle_enabled" {
   type        = bool
   default     = false
 
-  validation {
-    condition = (
-      !var.object_storage_lifecycle_enabled ||
-      var.object_storage_archive_after_days != null ||
-      var.object_storage_delete_previous_versions_after_days != null ||
-      var.object_storage_abort_multipart_uploads_after_days != null
-    )
-    error_message = "Al habilitar object_storage_lifecycle_enabled debe configurarse al menos una regla lifecycle."
-  }
-
-  validation {
-    condition = (
-      !var.object_storage_lifecycle_enabled ||
-      var.object_storage_delete_previous_versions_after_days == null ||
-      var.object_storage_versioning
-    )
-    error_message = "object_storage_versioning debe ser true para eliminar versiones anteriores."
-  }
 }
 
 variable "object_storage_archive_after_days" {
@@ -398,10 +370,6 @@ variable "logging_sources" {
     error_message = "logging_sources solo admite system, cloud-init y docker."
   }
 
-  validation {
-    condition     = !var.logging_enabled || length(var.logging_sources) > 0
-    error_message = "logging_sources debe contener al menos una fuente cuando logging_enabled es true."
-  }
 }
 
 variable "registry_enabled" {
@@ -414,11 +382,6 @@ variable "registry_repository_names" {
   description = "Nombres genericos de los repositorios OCIR; su longitud determina la cantidad creada"
   type        = set(string)
   default     = []
-
-  validation {
-    condition     = !var.registry_enabled || length(var.registry_repository_names) > 0
-    error_message = "registry_repository_names debe contener al menos un nombre cuando registry_enabled es true."
-  }
 
   validation {
     condition = alltrue([
@@ -456,10 +419,6 @@ variable "deployment_enabled" {
   type        = bool
   default     = false
 
-  validation {
-    condition     = !var.deployment_enabled || (var.registry_enabled && var.registry_immutable == true)
-    error_message = "registry_enabled y registry_immutable deben ser true cuando deployment_enabled es true."
-  }
 }
 
 variable "deployment_principals" {
@@ -489,15 +448,6 @@ variable "deployment_principals" {
     error_message = "Cada principal necesita una clave simple, un nombre IAM valido y al menos un repositorio."
   }
 
-  validation {
-    condition = alltrue(flatten([
-      for principal in values(var.deployment_principals) : [
-        for repository_name in principal.repository_names :
-        contains(var.registry_repository_names, repository_name)
-      ]
-    ]))
-    error_message = "Todos los repositorios autorizados deben existir en registry_repository_names."
-  }
 }
 
 variable "monitoring_enabled" {
@@ -542,10 +492,6 @@ variable "notification_endpoint" {
   default     = null
   sensitive   = true
 
-  validation {
-    condition     = !var.monitoring_enabled || try(length(trimspace(var.notification_endpoint)) > 0, false)
-    error_message = "notification_endpoint debe definirse cuando monitoring_enabled es true."
-  }
 }
 
 variable "cpu_alarm_threshold_percent" {

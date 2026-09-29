@@ -16,7 +16,7 @@ No se conceden permisos de borrado de objetos o buckets. El versionado y el life
 
 ## Dependencias
 
-- Terraform `>= 1.12.0`;
+- Terraform `>= 1.5.7` y `< 2.0.0`;
 - provider `oracle/oci` `8.29.0`;
 - compartment OCI existente;
 - grupo IAM existente;

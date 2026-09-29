@@ -37,7 +37,7 @@ El archivo est√° ignorado por Git y no debe contener claves, tokens ni contrase√
 
 ## OCI Cloud Shell
 
-Cloud Shell incluye Terraform y OCI CLI. Verifica que Terraform sea 1.12.0 o
+Cloud Shell incluye Terraform y OCI CLI. Verifica que Terraform sea 1.5.7 o
 posterior:
 
 ```bash
