@@ -72,18 +72,32 @@ def clean_text(value: Any, limit: int = 180) -> str:
 def normalize_path(raw_path: Any, target: Path, repo_root: Path) -> str:
     value = str(raw_path or "").replace("\\", "/")
     target_posix = target.as_posix().strip("/")
+    repo_root = repo_root.resolve()
 
     if target_posix in value:
         value = value[value.index(target_posix) :]
     else:
-        candidate = Path(value)
-        if candidate.is_absolute():
+        candidates = [Path(value)]
+        stripped = value.lstrip("/")
+        if stripped:
+            candidates.extend(
+                [
+                    repo_root / stripped,
+                    repo_root / target / stripped,
+                ]
+            )
+
+        for candidate in candidates:
             try:
-                value = candidate.resolve().relative_to(repo_root).as_posix()
+                resolved = candidate.resolve()
+                relative = resolved.relative_to(repo_root)
             except (OSError, ValueError, LarkError):
-                value = candidate.name
+                continue
+            if resolved.exists():
+                value = relative.as_posix()
+                break
         else:
-            value = f"{target_posix}/{value.lstrip('/')}"
+            return target_posix
 
     normalized = PurePosixPath(value)
     if normalized.is_absolute() or ".." in normalized.parts:
@@ -166,7 +180,11 @@ def run_checkov(
                     severity=severity,
                     rule_id=clean_text(check.get("check_id"), 80),
                     name=clean_text(check.get("check_name")),
-                    path=normalize_path(check.get("file_path"), target, repo_root),
+                    path=normalize_path(
+                        check.get("repo_file_path") or check.get("file_path"),
+                        target,
+                        repo_root,
+                    ),
                     resource=clean_text(check.get("resource"), 160),
                     line=line,
                 )
