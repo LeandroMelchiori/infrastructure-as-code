@@ -1,6 +1,4 @@
-data "oci_objectstorage_namespace" "platform" {
-  compartment_id = var.compartment_ocid
-}
+data "oci_objectstorage_namespace" "platform" {}
 
 module "storage" {
   source = "../modules/storage"

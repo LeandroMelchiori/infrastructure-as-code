@@ -26,6 +26,13 @@ una ubicacion segura que no dependa del mismo bucket administrado por este stack
 El compartment y el bucket usan `prevent_destroy`. El bucket tiene acceso
 privado, tier Standard, versionado habilitado y eventos de objetos desactivados.
 
+## Ownership
+
+Este root module es el único propietario Terraform del compartment y del bucket
+de state que crea. No debe ejecutarse `oci/terraform-state` con el mismo nombre de
+bucket ni importar aquí buckets de contenido. `oci/docker-platform` consume el
+bucket como backend, pero no lo administra como recurso.
+
 ## Permisos previos
 
 La identidad que ejecute Terraform necesita permisos para:
@@ -36,7 +43,7 @@ La identidad que ejecute Terraform necesita permisos para:
 
 El bootstrap no crea grupos, usuarios, API keys ni policies IAM amplias.
 
-## Configuracion en OCI Cloud Shell
+## Autenticacion y ejecucion
 
 ```bash
 cd oci/platform-bootstrap
@@ -45,10 +52,31 @@ cp terraform.tfvars.example terraform.tfvars
 
 Completa `terraform.tfvars` con el OCID del padre y un nombre de bucket unico.
 El archivo real esta ignorado y no debe incluir claves, tokens ni contrasenas.
-Cloud Shell ya proporciona autenticacion OCI; usa `InstancePrincipal` y no
-ejecutes el callback de navegador de `oci session authenticate` desde la shell
-remota. Para una ejecucion local fuera de OCI puede utilizarse un perfil temporal
-`SecurityToken`.
+
+Para una ejecucion interactiva sin credenciales permanentes, autentica OCI CLI
+desde una terminal local que pueda completar el callback del navegador:
+
+```bash
+oci session authenticate \
+  --region sa-saopaulo-1 \
+  --profile-name TERRAFORM
+```
+
+Configura el perfil temporal en `terraform.tfvars`:
+
+```hcl
+oci_auth                = "SecurityToken"
+oci_config_file_profile = "TERRAFORM"
+```
+
+El token temporal y su clave quedan en el perfil local de OCI, fuera de Git.
+Renuévalo cuando expire.
+
+La autenticacion preconfigurada de OCI Cloud Shell usa `instance_obo_user`.
+Ese modo no esta expuesto como metodo de autenticacion por el provider OCI de
+Terraform y no debe documentarse como equivalente a `InstancePrincipal` para
+este bootstrap. Ejecuta el bootstrap desde una terminal local con
+`SecurityToken`, o configura fuera de Git otro metodo soportado por el provider.
 
 ## Validar y revisar
 

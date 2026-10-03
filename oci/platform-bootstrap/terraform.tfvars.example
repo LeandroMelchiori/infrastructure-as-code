@@ -9,9 +9,9 @@ state_bucket_name = "REEMPLAZAR-terraform-state"
 
 region = "sa-saopaulo-1"
 
-# OCI Cloud Shell ya proporciona autenticacion al entorno.
-oci_auth                = "InstancePrincipal"
-oci_config_file_profile = "DEFAULT"
+# Perfil temporal creado localmente con `oci session authenticate`.
+oci_auth                = "SecurityToken"
+oci_config_file_profile = "TERRAFORM"
 
 freeform_tags = {
   Environment = "shared"

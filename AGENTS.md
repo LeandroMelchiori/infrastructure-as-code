@@ -11,6 +11,7 @@ Las infraestructuras actualmente implementadas son:
 - `oci/platform-bootstrap`: bootstrap independiente para crear el compartment de plataforma y su bucket privado de Terraform State.
 - `oci/terraform-state`: bootstrap independiente para un bucket privado y versionado dedicado al estado remoto de Terraform.
 - `oci/docker-platform`: plataforma Docker sobre Oracle Cloud Infrastructure con networking, Compute, Docker/Compose, Traefik, Vault/KMS, Object Storage, Monitoring/Notifications, backups, Logging, OCIR y base restringida para CI/CD de aplicaciones.
+- `oci/reference-architectures`: guías de composición reutilizables que enlazan root modules canónicos sin duplicar sus archivos Terraform.
 
 ## Estructura relevante
 
@@ -20,6 +21,11 @@ infrastructure-as-code/
 ├── AGENTS.md
 ├── .gitignore
 └── oci/
+    ├── reference-architectures/
+    │   └── single-vm-multi-app/
+    │       └── README.md
+    ├── case-studies/
+    │   └── nuevamente-dev-oci.md
     ├── terraform-state/
     │   ├── README.md
     │   ├── *.tf
@@ -157,7 +163,10 @@ Antes de entregar cambios en Terraform:
 - El state remoto de `oci/docker-platform` debe vivir en el bucket dedicado creado por `oci/terraform-state` u `oci/platform-bootstrap`.
 - Nunca mezcles Terraform State con el bucket `media`, logs, backups, imágenes OCIR ni artefactos de deployment.
 - No agregues credenciales al bloque `backend`, a `backend.oci.tfbackend.example` ni a Git.
-- Conserva compatibilidad con OCI Cloud Shell y autenticación `SecurityToken`/perfiles OCI cuando corresponda.
+- No presentes `instance_obo_user` de OCI Cloud Shell como equivalente a
+  `InstancePrincipal`: el provider OCI de Terraform no expone ese método. Para
+  operaciones interactivas sin credenciales permanentes, documenta un perfil
+  temporal `SecurityToken` creado desde una terminal local con navegador.
 - Documenta la migración desde state local mediante `terraform init -migrate-state` y exige detener ejecuciones concurrentes antes de migrar.
 - Los bootstrap `oci/terraform-state` y `oci/platform-bootstrap` conservan state local; trátalo como sensible y mantenlo fuera de Git.
 - No cambies backend y recursos de aplicación en la misma operación sin una razón explícita.
@@ -489,6 +498,8 @@ Actualiza documentación cuando cambies:
 - supuestos sobre OCI, Docker, Traefik, Vault, KMS u Object Storage.
 
 El README raíz debe seguir describiendo el catálogo general. El README dentro de cada infraestructura debe contener los detalles de esa plantilla.
+
+Las arquitecturas de referencia deben componer los root modules canónicos mediante documentación y enlaces. No copies archivos `.tf`, states ni configuraciones reales dentro de `oci/reference-architectures`.
 
 ## Estilo de cambios
 

@@ -25,6 +25,10 @@ Protege y respalda su `terraform.tfstate` fuera de Git. No lo almacenes dentro d
 mismo bucket que esta configuración administra, porque se introduciría una
 dependencia circular durante el bootstrap y la recuperación.
 
+Esta configuración es una alternativa a `oci/platform-bootstrap` cuando el
+compartment ya existe. No ejecutes ambos root modules sobre el mismo bucket: un
+recurso debe pertenecer a un solo state de Terraform.
+
 ## Configuración
 
 ```bash

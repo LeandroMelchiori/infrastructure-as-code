@@ -1,6 +1,4 @@
-data "oci_objectstorage_namespace" "platform" {
-  compartment_id = oci_identity_compartment.platform.id
-}
+data "oci_objectstorage_namespace" "platform" {}
 
 resource "oci_objectstorage_bucket" "terraform_state" {
   compartment_id = oci_identity_compartment.platform.id

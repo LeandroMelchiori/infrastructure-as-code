@@ -1293,21 +1293,22 @@ terraform init -backend-config=environments/dev/backend.oci.tfbackend
 
 ---
 
-## OCI Cloud Shell
+## Autenticación interactiva
 
-Cloud Shell incluye Terraform y OCI CLI. Comprueba primero que la versión sea
-1.5.7 o posterior:
+Comprueba primero que Terraform sea 1.5.7 o posterior:
 
 ```bash
 terraform version
 ```
 
-La autenticación preconfigurada de OCI CLI en Cloud Shell usa un token delegado.
-Para que el provider y el backend nativo compartan una autenticación soportada,
-crea un perfil temporal:
+Para trabajar interactivamente sin credenciales permanentes, ejecuta OCI CLI
+desde una terminal local que pueda completar el callback del navegador y crea
+un perfil temporal:
 
 ```bash
-oci session authenticate --profile-name TERRAFORM
+oci session authenticate \
+  --region sa-saopaulo-1 \
+  --profile-name TERRAFORM
 ```
 
 Configura `environments/dev/terraform.tfvars`:
@@ -1326,6 +1327,12 @@ config_file_profile = "TERRAFORM"
 
 No subas el perfil ni su token a Git. Si la sesión expira, renuévala antes de
 ejecutar `plan` o `apply`.
+
+La autenticación integrada de OCI Cloud Shell usa `instance_obo_user`, que no
+es un método aceptado por el provider OCI de Terraform. No la configures como
+`InstancePrincipal`: ese valor representa la identidad de la máquina de Cloud
+Shell, no la identidad delegada del usuario. Para ejecutar Terraform desde
+Cloud Shell se necesita otro método soportado configurado fuera de Git.
 
 ---
 
@@ -2000,6 +2007,14 @@ La plataforma incluye un bucket de OCI Object Storage preparado para almacenar
 archivos asociados a las aplicaciones desplegadas. El bucket y su lifecycle
 policy opcional viven en el módulo local `oci/modules/storage`; el namespace
 compartido y las políticas IAM permanecen en el root.
+
+### Ownership
+
+Este root module administra únicamente su bucket `media`. No administra el
+bucket de Terraform State ni los buckets declarados en
+`external_object_storage_buckets`. Estos últimos conservan su propio root module
+y state; la plataforma sólo crea el permiso IAM necesario para que su Instance
+Principal acceda a ellos.
 
 Puede utilizarse para:
 
