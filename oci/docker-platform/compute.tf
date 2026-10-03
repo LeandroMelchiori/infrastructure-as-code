@@ -55,11 +55,13 @@ resource "oci_core_instance" "server" {
             templatefile(
               "${path.module}/proxy/docker-compose.yml.tftpl",
               {
-                acme_email    = var.acme_email
+                acme_email    = var.acme_email == null ? "" : var.acme_email
+                https_enabled = var.https_enabled
                 traefik_image = var.traefik_image
               }
             )
           )
+          https_enabled    = var.https_enabled
           registry_enabled = var.registry_enabled
           registry_helper_b64 = base64encode(
             templatefile(

@@ -23,6 +23,7 @@
 **/.env
 **/.env.*
 !**/.env.example
+**/runtime.env
 
 # Keys
 **/*.pem

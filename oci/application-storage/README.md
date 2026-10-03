@@ -16,11 +16,21 @@ No se conceden permisos de borrado de objetos o buckets. El versionado y el life
 
 ## Dependencias
 
-- Terraform `>= 1.12.0`;
+- Terraform `>= 1.5.7` y `< 2.0.0`;
 - provider `oracle/oci` `8.29.0`;
 - compartment OCI existente;
 - grupo IAM existente;
 - bucket remoto de Terraform State creado mediante [`../terraform-state`](../terraform-state/).
+
+## Ownership
+
+Este root module es el único propietario del bucket de documentos y de su policy
+IAM. No debe usar el nombre del bucket de Terraform State ni el nombre del bucket
+`media` administrado por `oci/docker-platform`.
+
+La plataforma Compute puede recibir acceso a este bucket mediante
+`external_object_storage_buckets`. Ese grant sólo crea IAM en el state de la
+plataforma: el bucket continúa administrado exclusivamente por este root module.
 
 ## Preparacion
 

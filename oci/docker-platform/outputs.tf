@@ -1,11 +1,107 @@
 output "server_id" {
   description = "OCID de la instancia"
   value       = oci_core_instance.server.id
+
+  precondition {
+    condition = (
+      var.environment_name == "dev" ||
+      !contains(["0.0.0.0/0", "::/0"], var.ssh_source_cidr)
+    )
+    error_message = "staging y prod no permiten SSH desde 0.0.0.0/0 o ::/0."
+  }
+
+  precondition {
+    condition = (
+      var.environment_name != "prod" ||
+      (
+        var.monitoring_enabled &&
+        var.logging_enabled &&
+        var.backup_enabled &&
+        var.registry_enabled &&
+        var.registry_visibility == "PRIVATE" &&
+        var.registry_immutable == true &&
+        var.object_storage_access_type == "NoPublicAccess" &&
+        var.object_storage_versioning &&
+        var.https_enabled
+      )
+    )
+    error_message = "prod requiere monitoring, logging, backups, registry privado e inmutable, Object Storage privado con versionado y HTTPS."
+  }
+
+  precondition {
+    condition = (
+      !var.https_enabled ||
+      (
+        var.acme_email != null &&
+        can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.acme_email))
+      )
+    )
+    error_message = "acme_email debe contener un email válido cuando https_enabled es true."
+  }
+
+  precondition {
+    condition = (
+      !var.object_storage_lifecycle_enabled ||
+      var.object_storage_archive_after_days != null ||
+      var.object_storage_delete_previous_versions_after_days != null ||
+      var.object_storage_abort_multipart_uploads_after_days != null
+    )
+    error_message = "Al habilitar object_storage_lifecycle_enabled debe configurarse al menos una regla lifecycle."
+  }
+
+  precondition {
+    condition = (
+      !var.object_storage_lifecycle_enabled ||
+      var.object_storage_delete_previous_versions_after_days == null ||
+      var.object_storage_versioning
+    )
+    error_message = "object_storage_versioning debe ser true para eliminar versiones anteriores."
+  }
+
+  precondition {
+    condition     = !var.logging_enabled || length(var.logging_sources) > 0
+    error_message = "logging_sources debe contener al menos una fuente cuando logging_enabled es true."
+  }
+
+  precondition {
+    condition     = !var.registry_enabled || length(var.registry_repository_names) > 0
+    error_message = "registry_repository_names debe contener al menos un nombre cuando registry_enabled es true."
+  }
+
+  precondition {
+    condition     = !var.deployment_enabled || (var.registry_enabled && var.registry_immutable == true)
+    error_message = "registry_enabled y registry_immutable deben ser true cuando deployment_enabled es true."
+  }
+
+  precondition {
+    condition = alltrue(flatten([
+      for principal in values(var.deployment_principals) : [
+        for repository_name in principal.repository_names :
+        contains(var.registry_repository_names, repository_name)
+      ]
+    ]))
+    error_message = "Todos los repositorios autorizados deben existir en registry_repository_names."
+  }
+
+  precondition {
+    condition     = !var.monitoring_enabled || try(length(trimspace(var.notification_endpoint)) > 0, false)
+    error_message = "notification_endpoint debe definirse cuando monitoring_enabled es true."
+  }
 }
 
 output "server_public_ip" {
   description = "IP pública reservada"
   value       = oci_core_public_ip.server.ip_address
+}
+
+output "https_enabled" {
+  description = "Indica si Traefik publica HTTPS y gestiona certificados ACME"
+  value       = var.https_enabled
+}
+
+output "public_endpoint_scheme" {
+  description = "Esquema esperado para acceder a las aplicaciones"
+  value       = var.https_enabled ? "https" : "http"
 }
 
 output "server_private_ip" {
@@ -56,6 +152,22 @@ output "media_bucket_versioning" {
 output "object_storage_lifecycle_policy_id" {
   description = "ID de la política lifecycle del bucket media, o null si está deshabilitada"
   value       = module.storage.object_storage_lifecycle_policy_id
+}
+
+output "external_object_storage_policy_id" {
+  description = "OCID de la policy para buckets externos, o null si no hay accesos configurados"
+  value       = try(oci_identity_policy.server_external_object_storage[0].id, null)
+}
+
+output "external_object_storage_grants" {
+  description = "Accesos declarados para buckets externos, sin credenciales"
+  value = {
+    for name, grant in var.external_object_storage_buckets : name => {
+      compartment_ocid = grant.compartment_ocid
+      bucket_name      = grant.bucket_name
+      access           = grant.access
+    }
+  }
 }
 
 output "backup_enabled" {

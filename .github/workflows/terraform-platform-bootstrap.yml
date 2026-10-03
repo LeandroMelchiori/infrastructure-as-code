@@ -1,0 +1,61 @@
+name: Terraform Platform Bootstrap CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/terraform-platform-bootstrap.yml"
+      - "oci/platform-bootstrap/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-platform-bootstrap-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+
+jobs:
+  validate:
+    name: Validate platform bootstrap
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+        working-directory: oci/platform-bootstrap
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.5.7"
+          terraform_wrapper: false
+
+      - name: Terraform format
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init without backend
+        run: terraform init -backend=false -input=false -no-color
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Publish validation summary
+        run: |
+          {
+            echo "## Platform bootstrap validation"
+            echo
+            echo "- Terraform format: passed"
+            echo "- Terraform validation: passed"
+            echo "- Backend access: disabled"
+            echo "- OCI access: not requested"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -10,8 +10,8 @@ module "storage" {
   versioning       = var.object_storage_versioning
   common_tags      = local.common_tags
 
-  lifecycle_enabled                         = false
-  archive_after_days                        = null
-  delete_previous_versions_after_days       = null
-  abort_multipart_uploads_after_days        = null
+  lifecycle_enabled                   = false
+  archive_after_days                  = null
+  delete_previous_versions_after_days = null
+  abort_multipart_uploads_after_days  = null
 }

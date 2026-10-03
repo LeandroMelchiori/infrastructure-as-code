@@ -22,7 +22,8 @@ public_subnet_cidr = "10.30.1.0/24"
 ssh_public_key_path = "~/.ssh/cloudshellkey.pub"
 ssh_source_cidr     = "192.0.2.10/32"
 
-acme_email = "staging@example.invalid"
+https_enabled = true
+acme_email    = "staging@example.invalid"
 
 object_storage_access_type                         = "NoPublicAccess"
 object_storage_versioning                          = true
@@ -30,6 +31,9 @@ object_storage_lifecycle_enabled                   = false
 object_storage_archive_after_days                  = null
 object_storage_delete_previous_versions_after_days = null
 object_storage_abort_multipart_uploads_after_days  = null
+
+# Buckets existentes fuera del compartment de plataforma (opt-in)
+external_object_storage_buckets = {}
 
 backup_enabled        = true
 backup_frequency      = "WEEKLY"

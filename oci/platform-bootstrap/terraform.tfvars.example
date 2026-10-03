@@ -1,0 +1,18 @@
+# OCID del tenancy o de un compartment padre existente.
+parent_compartment_ocid = "ocid1.tenancy.oc1..REEMPLAZAR"
+
+platform_compartment_name        = "application-platform"
+platform_compartment_description = "Infraestructura compartida para aplicaciones propias"
+
+# Debe ser unico dentro del namespace de Object Storage.
+state_bucket_name = "REEMPLAZAR-terraform-state"
+
+region = "sa-saopaulo-1"
+
+# Perfil temporal creado localmente con `oci session authenticate`.
+oci_auth                = "SecurityToken"
+oci_config_file_profile = "TERRAFORM"
+
+freeform_tags = {
+  Environment = "shared"
+}

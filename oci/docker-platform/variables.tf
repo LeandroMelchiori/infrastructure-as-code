@@ -90,9 +90,18 @@ variable "image_ocid" {
   default     = null
 }
 
+variable "https_enabled" {
+  description = "Habilita HTTPS, redirección desde HTTP y certificados Let's Encrypt"
+  type        = bool
+  default     = true
+}
+
 variable "acme_email" {
-  description = "Email utilizado por Let's Encrypt"
+  description = "Email utilizado por Let's Encrypt; puede ser null cuando HTTPS está deshabilitado"
   type        = string
+  default     = null
+  nullable    = true
+
 }
 
 variable "traefik_image" {
@@ -134,24 +143,6 @@ variable "object_storage_lifecycle_enabled" {
   type        = bool
   default     = false
 
-  validation {
-    condition = (
-      !var.object_storage_lifecycle_enabled ||
-      var.object_storage_archive_after_days != null ||
-      var.object_storage_delete_previous_versions_after_days != null ||
-      var.object_storage_abort_multipart_uploads_after_days != null
-    )
-    error_message = "Al habilitar object_storage_lifecycle_enabled debe configurarse al menos una regla lifecycle."
-  }
-
-  validation {
-    condition = (
-      !var.object_storage_lifecycle_enabled ||
-      var.object_storage_delete_previous_versions_after_days == null ||
-      var.object_storage_versioning
-    )
-    error_message = "object_storage_versioning debe ser true para eliminar versiones anteriores."
-  }
 }
 
 variable "object_storage_archive_after_days" {
@@ -196,6 +187,61 @@ variable "object_storage_abort_multipart_uploads_after_days" {
       )
     )
     error_message = "object_storage_abort_multipart_uploads_after_days debe ser null o un entero mayor o igual que 1."
+  }
+}
+
+variable "external_object_storage_buckets" {
+  description = "Buckets existentes fuera del compartment de plataforma a los que Compute accede mediante Instance Principal"
+  type = map(object({
+    compartment_ocid = string
+    bucket_name      = string
+    access           = string
+  }))
+  default  = {}
+  nullable = false
+
+  validation {
+    condition = alltrue([
+      for name in keys(var.external_object_storage_buckets) :
+      can(regex("^[a-z][a-z0-9_-]{0,63}$", name))
+    ])
+    error_message = "Las claves de external_object_storage_buckets deben comenzar con una letra minúscula y contener sólo letras minúsculas, números, guiones o guiones bajos."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      can(regex("^ocid1\\.compartment\\.", trimspace(grant.compartment_ocid)))
+    ])
+    error_message = "Cada compartment_ocid de external_object_storage_buckets debe ser un OCID de compartment válido."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      length(trimspace(grant.bucket_name)) >= 1 &&
+      length(trimspace(grant.bucket_name)) <= 256 &&
+      !strcontains(grant.bucket_name, "'") &&
+      !strcontains(grant.bucket_name, "\n") &&
+      !strcontains(grant.bucket_name, "\r")
+    ])
+    error_message = "Cada bucket_name debe tener entre 1 y 256 caracteres y no puede contener comillas simples ni saltos de línea."
+  }
+
+  validation {
+    condition = alltrue([
+      for grant in values(var.external_object_storage_buckets) :
+      contains(["READ", "WRITE_ONCE", "READ_WRITE"], grant.access)
+    ])
+    error_message = "El acceso a buckets externos debe ser READ, WRITE_ONCE o READ_WRITE."
+  }
+
+  validation {
+    condition = length(distinct([
+      for grant in values(var.external_object_storage_buckets) :
+      "${lower(trimspace(grant.compartment_ocid))}/${lower(trimspace(grant.bucket_name))}"
+    ])) == length(var.external_object_storage_buckets)
+    error_message = "No se puede declarar dos veces el mismo bucket externo dentro del mismo compartment."
   }
 }
 
@@ -324,10 +370,6 @@ variable "logging_sources" {
     error_message = "logging_sources solo admite system, cloud-init y docker."
   }
 
-  validation {
-    condition     = !var.logging_enabled || length(var.logging_sources) > 0
-    error_message = "logging_sources debe contener al menos una fuente cuando logging_enabled es true."
-  }
 }
 
 variable "registry_enabled" {
@@ -340,11 +382,6 @@ variable "registry_repository_names" {
   description = "Nombres genericos de los repositorios OCIR; su longitud determina la cantidad creada"
   type        = set(string)
   default     = []
-
-  validation {
-    condition     = !var.registry_enabled || length(var.registry_repository_names) > 0
-    error_message = "registry_repository_names debe contener al menos un nombre cuando registry_enabled es true."
-  }
 
   validation {
     condition = alltrue([
@@ -382,10 +419,6 @@ variable "deployment_enabled" {
   type        = bool
   default     = false
 
-  validation {
-    condition     = !var.deployment_enabled || (var.registry_enabled && var.registry_immutable == true)
-    error_message = "registry_enabled y registry_immutable deben ser true cuando deployment_enabled es true."
-  }
 }
 
 variable "deployment_principals" {
@@ -415,15 +448,6 @@ variable "deployment_principals" {
     error_message = "Cada principal necesita una clave simple, un nombre IAM valido y al menos un repositorio."
   }
 
-  validation {
-    condition = alltrue(flatten([
-      for principal in values(var.deployment_principals) : [
-        for repository_name in principal.repository_names :
-        contains(var.registry_repository_names, repository_name)
-      ]
-    ]))
-    error_message = "Todos los repositorios autorizados deben existir en registry_repository_names."
-  }
 }
 
 variable "monitoring_enabled" {
@@ -468,10 +492,6 @@ variable "notification_endpoint" {
   default     = null
   sensitive   = true
 
-  validation {
-    condition     = !var.monitoring_enabled || try(length(trimspace(var.notification_endpoint)) > 0, false)
-    error_message = "notification_endpoint debe definirse cuando monitoring_enabled es true."
-  }
 }
 
 variable "cpu_alarm_threshold_percent" {

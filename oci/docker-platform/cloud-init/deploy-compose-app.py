@@ -30,13 +30,19 @@ OCIR_REPOSITORY_PATTERN = re.compile(
 DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 SERVICE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$")
 
-CONFIG_KEYS = {
+CONFIG_REQUIRED_KEYS = {
     "allowed_images",
     "compose_file",
     "health_url",
     "repository",
     "service",
 }
+CONFIG_OPTIONAL_KEYS = {"runtime_env_file"}
+RUNTIME_ENV_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+RUNTIME_ENV_FILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+RUNTIME_ENV_RESERVED_KEYS = {"DEPLOY_IMAGE"}
+RUNTIME_ENV_MAX_BYTES = 65536
+RUNTIME_ENV_MAX_ENTRIES = 128
 TOP_LEVEL_KEYS = {"name", "networks", "services", "volumes"}
 SERVICE_KEYS = {
     "cap_drop",
@@ -241,7 +247,11 @@ def load_application(app_name):
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
         raise DeploymentError("deployment.json is not valid JSON") from error
 
-    if not isinstance(config, dict) or set(config) != CONFIG_KEYS:
+    if (
+        not isinstance(config, dict)
+        or not CONFIG_REQUIRED_KEYS.issubset(config)
+        or set(config) - CONFIG_REQUIRED_KEYS - CONFIG_OPTIONAL_KEYS
+    ):
         raise DeploymentError("deployment.json does not match the closed schema")
 
     for key in ("compose_file", "health_url", "repository", "service"):
@@ -285,8 +295,73 @@ def load_application(app_name):
 
     compose_path = app_directory / compose_name
     assert_secure_path(compose_path, "file")
+    runtime_environment = load_runtime_environment(app_directory, config.get("runtime_env_file"))
     hardening_policy = load_hardening_policy(app_directory)
-    return config, compose_path, hardening_policy
+    return config, compose_path, hardening_policy, runtime_environment
+
+
+def validate_runtime_env_file_name(value):
+    if (
+        not isinstance(value, str)
+        or Path(value).name != value
+        or not RUNTIME_ENV_FILE_PATTERN.fullmatch(value)
+    ):
+        raise DeploymentError("runtime_env_file must be a simple file name")
+
+
+def normalize_runtime_environment(content):
+    if not isinstance(content, str) or len(content.encode("utf-8")) > RUNTIME_ENV_MAX_BYTES:
+        raise DeploymentError("runtime environment file is invalid or too large")
+
+    entries = []
+    seen = set()
+    for raw_line in content.splitlines():
+        if not raw_line or raw_line.startswith("#"):
+            continue
+        if raw_line != raw_line.strip():
+            raise DeploymentError("runtime environment entries cannot have outer whitespace")
+
+        key, separator, value = raw_line.partition("=")
+        if not separator or not RUNTIME_ENV_KEY_PATTERN.fullmatch(key):
+            raise DeploymentError("runtime environment contains an invalid key")
+        if key in RUNTIME_ENV_RESERVED_KEYS:
+            raise DeploymentError("runtime environment contains a reserved key")
+        if key in seen:
+            raise DeploymentError("runtime environment contains a duplicate key")
+        if (
+            not value
+            or value != value.strip()
+            or len(value) > 8192
+            or any(ord(character) < 33 or ord(character) > 126 for character in value)
+            or any(character in value for character in "\"'$`\\")
+        ):
+            raise DeploymentError("runtime environment contains an unsafe value")
+
+        seen.add(key)
+        entries.append(f"{key}={value}")
+
+    if len(entries) > RUNTIME_ENV_MAX_ENTRIES:
+        raise DeploymentError("runtime environment contains too many entries")
+    return "" if not entries else "\n".join(entries) + "\n"
+
+
+def validate_runtime_env_metadata(metadata):
+    if metadata.st_size > RUNTIME_ENV_MAX_BYTES:
+        raise DeploymentError("runtime environment file is too large")
+    if not metadata.st_mode & stat.S_IRUSR:
+        raise DeploymentError("runtime environment file must be readable by root")
+    if metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise DeploymentError("runtime environment file must not grant group/world permissions")
+
+
+def load_runtime_environment(app_directory, file_name):
+    if file_name is None:
+        return ""
+    validate_runtime_env_file_name(file_name)
+    path = app_directory / file_name
+    assert_secure_path(path, "file")
+    validate_runtime_env_metadata(os.lstat(path))
+    return normalize_runtime_environment(read_secure_text(path))
 
 
 def validate_container_path(value, context):
@@ -818,8 +893,19 @@ def validate_images(rendered, config, deployment_image):
             raise DeploymentError("an auxiliary service image is not explicitly allowlisted")
 
 
-def write_image_environment(path, image_uri):
-    write_secure_text(path, f"DEPLOY_IMAGE={image_uri}\n")
+def write_deployment_environment(path, image_uri, runtime_environment):
+    write_secure_text(path, f"{runtime_environment}DEPLOY_IMAGE={image_uri}\n")
+
+
+def read_deployment_image(environment_content):
+    matches = [
+        line.removeprefix("DEPLOY_IMAGE=")
+        for line in environment_content.splitlines()
+        if line.startswith("DEPLOY_IMAGE=")
+    ]
+    if len(matches) != 1:
+        raise DeploymentError("deployment image metadata is invalid")
+    return matches[0]
 
 
 def resolve_digest(repository, commit_sha):
@@ -892,11 +978,7 @@ def restore_previous(app_name, work_directory, config, hardening_policy):
         assert_secure_path(rollback_directory, "directory")
         copy_secure_file(rollback_compose, current_compose, 0o640)
         copy_secure_file(rollback_env, current_env, 0o600)
-        previous_image = read_secure_text(current_env).strip()
-        prefix = "DEPLOY_IMAGE="
-        if not previous_image.startswith(prefix):
-            raise DeploymentError("rollback image metadata is invalid")
-        previous_image = previous_image[len(prefix) :]
+        previous_image = read_deployment_image(read_secure_text(current_env))
         if not previous_image.startswith(f"{config['repository']}@"):
             raise DeploymentError("rollback digest is outside the authorized repository")
         rendered = render_compose(app_name, current_compose, current_env)
@@ -911,7 +993,7 @@ def restore_previous(app_name, work_directory, config, hardening_policy):
 
 
 def deploy(app_name, commit_sha):
-    config, source_compose, hardening_policy = load_application(app_name)
+    config, source_compose, hardening_policy, runtime_environment = load_application(app_name)
     work_directory = WORK_ROOT / app_name
     work_directory.mkdir(mode=0o750, parents=False, exist_ok=True)
     os.chown(work_directory, 0, 0)
@@ -947,14 +1029,14 @@ def deploy(app_name, commit_sha):
 
         placeholder_digest = "sha256:" + ("0" * 64)
         placeholder_image = f"{config['repository']}@{placeholder_digest}"
-        write_image_environment(candidate_env, placeholder_image)
+        write_deployment_environment(candidate_env, placeholder_image, runtime_environment)
         rendered = render_compose(app_name, candidate_compose, candidate_env)
         validate_deployment(rendered, config, placeholder_image, hardening_policy)
         LOGGER.info("app=%s commit=%s stage=validation_complete", app_name, commit_sha)
 
         deployment_image = resolve_digest(config["repository"], commit_sha)
         digest = deployment_image.rsplit("@", 1)[1]
-        write_image_environment(candidate_env, deployment_image)
+        write_deployment_environment(candidate_env, deployment_image, runtime_environment)
         rendered = render_compose(app_name, candidate_compose, candidate_env)
         validate_deployment(rendered, config, deployment_image, hardening_policy)
         LOGGER.info("app=%s commit=%s stage=digest_resolved digest=%s", app_name, commit_sha, digest)

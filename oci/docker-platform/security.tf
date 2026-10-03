@@ -1,6 +1,6 @@
 locals {
-  public_web_ports = {
-    http  = 80
-    https = 443
-  }
+  public_web_ports = merge(
+    { http = 80 },
+    var.https_enabled ? { https = 443 } : {}
+  )
 }

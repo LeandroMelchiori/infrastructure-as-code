@@ -25,6 +25,10 @@ Protege y respalda su `terraform.tfstate` fuera de Git. No lo almacenes dentro d
 mismo bucket que esta configuración administra, porque se introduciría una
 dependencia circular durante el bootstrap y la recuperación.
 
+Esta configuración es una alternativa a `oci/platform-bootstrap` cuando el
+compartment ya existe. No ejecutes ambos root modules sobre el mismo bucket: un
+recurso debe pertenecer a un solo state de Terraform.
+
 ## Configuración
 
 ```bash
@@ -37,7 +41,7 @@ El archivo está ignorado por Git y no debe contener claves, tokens ni contrase�
 
 ## OCI Cloud Shell
 
-Cloud Shell incluye Terraform y OCI CLI. Verifica que Terraform sea 1.12.0 o
+Cloud Shell incluye Terraform y OCI CLI. Verifica que Terraform sea 1.5.7 o
 posterior:
 
 ```bash
