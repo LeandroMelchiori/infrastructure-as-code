@@ -9,6 +9,29 @@ examples:
       - region
       - sizing
 
+  - request: "Do everything inside Always Free."
+    select:
+      architecture: oci-single-vm-multi-app
+      constraint_profile: always-free
+    infer:
+      compute_from_profile_defaults: true
+    require:
+      - verify_account_entitlement
+      - verify_home_region
+      - terraform_plan
+      - human_review_before_apply
+
+  - request: "Use one OCI VM with 1 OCPU and 6 GB RAM, inside Always Free."
+    select:
+      architecture: oci-single-vm-multi-app
+      constraint_profile: always-free
+      compute:
+        ocpus: 1
+        memory_gb: 6
+    require:
+      - deterministic_resolution
+      - verify_account_entitlement
+
   - request: "I need the Docker platform plus private document storage."
     select:
       architecture: oci-single-vm-multi-app
