@@ -1,0 +1,21 @@
+version: 1
+purpose: Small-context entrypoint for infrastructure agents.
+workflow:
+  - inspect_request
+  - select_provider
+  - select_reference_architecture
+  - resolve_capabilities
+  - validate_policy
+  - request_missing_decisions
+  - generate_plan
+  - terraform_validate
+  - terraform_plan
+  - require_human_approval_before_apply
+entrypoints:
+  infrastructure_catalog: ../catalog.yaml
+  rules: ./rules.md
+  examples: ./examples.yaml
+guidance:
+  prefer_reference_architectures: true
+  never_scan_entire_repository_by_default: true
+  never_apply_from_llm_reasoning_alone: true
