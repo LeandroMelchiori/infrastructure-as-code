@@ -1,0 +1,32 @@
+id: always-free
+provider: oci
+kind: constraint-profile
+description: Conservative OCI Always Free guardrail for the current single-VM Docker reference architecture.
+last_reviewed: 2026-10-04
+source_of_truth:
+  - https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
+  - https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier.htm
+verification:
+  account_entitlement_required: true
+  home_region_required: true
+  capacity_not_guaranteed: true
+  recheck_before_apply: true
+
+compute:
+  allowed_shapes:
+    VM.Standard.A1.Flex:
+      architecture: arm64
+      max_total_ocpus: 2
+      max_total_memory_gb: 12
+      default_ocpus: 2
+      default_memory_gb: 12
+
+storage:
+  min_boot_volume_gb_per_instance: 47
+  max_total_block_volume_gb: 200
+  default_boot_volume_gb: 50
+
+notes:
+  - Limits are modeled as tenancy-wide free entitlements, not per-instance allowances.
+  - This profile is intentionally conservative and must be reviewed when Oracle changes Free Tier entitlements.
+  - A valid resolution does not guarantee regional capacity or authorize terraform apply.
