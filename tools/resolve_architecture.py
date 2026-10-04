@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from estimate_cost import estimate_monthly_cost
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -32,6 +34,11 @@ def positive_number(name: str, value: float) -> None:
         raise ValueError(f"{name} must be greater than zero")
 
 
+def nonnegative_number(name: str, value: float) -> None:
+    if value < 0:
+        raise ValueError(f"{name} must be zero or greater")
+
+
 def resolve(
     architecture_id: str,
     requested: list[str],
@@ -41,6 +48,8 @@ def resolve(
     memory_gb: float | None = None,
     boot_volume_gb: float | None = None,
     instances: int = 1,
+    boot_vpus_per_gb: int | None = None,
+    max_monthly_usd: float | None = None,
 ) -> dict:
     catalog = load_catalog()
     architectures = catalog.get("architectures", {})
@@ -87,6 +96,8 @@ def resolve(
     positive_number("ocpus", selected_ocpus)
     positive_number("memory_gb", selected_memory)
     positive_number("boot_volume_gb", selected_boot)
+    if max_monthly_usd is not None:
+        nonnegative_number("max_monthly_usd", max_monthly_usd)
 
     warnings = []
     profile_summary = None
@@ -182,6 +193,40 @@ def resolve(
             "the Docker platform must only consume it as an external resource"
         )
 
+    cost = estimate_monthly_cost(
+        provider=architecture["provider"],
+        shape=shape,
+        ocpus=selected_ocpus,
+        memory_gb=selected_memory,
+        boot_volume_gb=selected_boot,
+        instances=instances,
+        boot_vpus_per_gb=boot_vpus_per_gb,
+        profile_id=profile_id,
+    )
+
+    budget = None
+    if max_monthly_usd is not None:
+        estimated = cost["estimated_monthly_usd"]
+        if estimated > max_monthly_usd:
+            raise ValueError(
+                f"Modeled monthly cost USD {estimated:.2f} exceeds budget "
+                f"USD {max_monthly_usd:.2f}"
+            )
+
+        budget = {
+            "max_monthly_usd": max_monthly_usd,
+            "modeled_estimated_monthly_usd": estimated,
+            "modeled_remaining_usd": round(max_monthly_usd - estimated, 4),
+            "status": "within_modeled_scope",
+        }
+
+        excluded = cost.get("modeled_scope", {}).get("excluded", [])
+        if excluded:
+            warnings.append(
+                "Budget validation covers modeled resources only; excluded services "
+                "or usage can add cost"
+            )
+
     input_names = compute.get("terraform_inputs", {})
     terraform_inputs = {
         input_names.get("shape", "shape"): shape,
@@ -206,7 +251,10 @@ def resolve(
             "ocpus_per_instance": selected_ocpus,
             "memory_gb_per_instance": selected_memory,
             "boot_volume_gb_per_instance": selected_boot,
+            "boot_vpus_per_gb": cost["boot_vpus_per_gb"],
         },
+        "cost_estimate": cost,
+        "budget": budget,
         "terraform_inputs": terraform_inputs,
         "warnings": warnings,
         "requires_human_approval": {
@@ -224,7 +272,9 @@ def main() -> None:
     parser.add_argument("--ocpus", type=float)
     parser.add_argument("--memory-gb", type=float)
     parser.add_argument("--boot-volume-gb", type=float)
+    parser.add_argument("--boot-vpus-per-gb", type=int)
     parser.add_argument("--instances", type=int, default=1)
+    parser.add_argument("--max-monthly-usd", type=float)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
 
@@ -237,6 +287,8 @@ def main() -> None:
             memory_gb=args.memory_gb,
             boot_volume_gb=args.boot_volume_gb,
             instances=args.instances,
+            boot_vpus_per_gb=args.boot_vpus_per_gb,
+            max_monthly_usd=args.max_monthly_usd,
         )
     except (ValueError, KeyError) as exc:
         result = {"valid": False, "error": str(exc)}
