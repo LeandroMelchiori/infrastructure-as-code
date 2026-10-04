@@ -13,6 +13,7 @@ def test_resolves_existing_oci_architecture():
     assert result["provider"] == "oci"
     assert result["capabilities"] == ["observability", "backup"]
     assert result["requires_human_approval"]["apply"] is True
+    assert result["cost_estimate"]["estimated_monthly_usd"] > 0
 
 
 def test_resolves_always_free_defaults():
@@ -26,6 +27,8 @@ def test_resolves_always_free_defaults():
     assert result["compute"]["memory_gb_per_instance"] == 12
     assert result["terraform_inputs"]["ocpus"] == 2
     assert result["terraform_inputs"]["memory_in_gbs"] == 12
+    assert result["cost_estimate"]["estimated_monthly_usd"] == 0.0
+    assert result["cost_estimate"]["conditional_free"] is True
 
 
 def test_resolves_custom_sizing_inside_always_free():
@@ -64,6 +67,43 @@ def test_custom_sizing_without_profile_is_not_claimed_free():
     )
     assert result["valid"] is True
     assert any("not guaranteed to be free" in item for item in result["warnings"])
+
+
+def test_budget_accepts_modeled_cost_within_limit():
+    result = resolve(
+        "oci-single-vm-multi-app",
+        [],
+        ocpus=1,
+        memory_gb=6,
+        max_monthly_usd=20,
+    )
+    assert result["budget"]["status"] == "within_modeled_scope"
+    assert result["budget"]["modeled_estimated_monthly_usd"] == 15.995
+
+
+def test_budget_rejects_modeled_cost_above_limit():
+    try:
+        resolve(
+            "oci-single-vm-multi-app",
+            [],
+            ocpus=1,
+            memory_gb=6,
+            max_monthly_usd=10,
+        )
+    except ValueError as exc:
+        assert "exceeds budget" in str(exc)
+    else:
+        raise AssertionError("Expected budget constraint violation")
+
+
+def test_zero_budget_passes_with_conditional_always_free_profile():
+    result = resolve(
+        "oci-single-vm-multi-app",
+        [],
+        profile_id="always-free",
+        max_monthly_usd=0,
+    )
+    assert result["budget"]["modeled_estimated_monthly_usd"] == 0.0
 
 
 def test_single_vm_architecture_rejects_multiple_instances():
