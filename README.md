@@ -89,6 +89,23 @@ infrastructure-as-code/
     └── ...
 ```
 
+## Resolución de restricciones para agentes
+
+El repositorio incluye un resolver determinista en `tools/resolve_architecture.py` para que agentes como Nanami conviertan requisitos de alto nivel en inputs concretos de infraestructura sin depender de la memoria del LLM.
+
+Ejemplo Always Free:
+
+```bash
+python tools/resolve_architecture.py \
+  --architecture oci-single-vm-multi-app \
+  --profile always-free \
+  --ocpus 1 \
+  --memory-gb 6 \
+  --json
+```
+
+Los perfiles de restricciones viven en `policies/`. Un perfil válido limita recursos y genera inputs Terraform, pero no autoriza `terraform apply`; la elegibilidad de la cuenta, región, capacidad y el plan deben revisarse antes del despliegue.
+
 ## Terraform State
 
 Cada arquitectura Terraform mantiene su propio state. `oci/docker-platform` usa
