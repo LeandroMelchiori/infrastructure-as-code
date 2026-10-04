@@ -1,0 +1,55 @@
+version: 1
+name: infrastructure-as-code
+description: Reusable infrastructure architectures and Terraform capabilities.
+consumers: [humans, codex, claude-code, nanami]
+
+architectures:
+  oci-single-vm-multi-app:
+    provider: oci
+    path: oci/reference-architectures/single-vm-multi-app
+    implementation: oci/docker-platform
+    status: stable
+    purpose: Run multiple Docker applications on one OCI Compute platform.
+    compatible:
+      - application-storage
+      - registry
+      - logging
+      - observability
+      - backup
+      - vault
+
+capabilities:
+  application-storage:
+    path: oci/application-storage
+    kind: root-module
+  registry:
+    path: oci/modules/registry
+    kind: module
+  logging:
+    path: oci/modules/logging
+    kind: module
+  observability:
+    path: oci/modules/observability
+    kind: module
+  backup:
+    path: oci/modules/backup
+    kind: module
+  vault:
+    path: oci/modules/vault
+    kind: module
+
+foundations:
+  platform-bootstrap:
+    path: oci/platform-bootstrap
+    owns: [compartment, terraform-state]
+    state: local
+  terraform-state:
+    path: oci/terraform-state
+    owns: [terraform-state]
+    state: local
+
+policies:
+  never_commit: [terraform.tfvars, "*.tfstate", "*.tfstate.*", "*.tfbackend", credentials]
+  plan_before_apply: true
+  apply_requires_human_approval: true
+  destroy_requires_human_approval: true
