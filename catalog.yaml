@@ -10,6 +10,20 @@ architectures:
     implementation: oci/docker-platform
     status: stable
     purpose: Run multiple Docker applications on one OCI Compute platform.
+    compute:
+      shape: VM.Standard.A1.Flex
+      architecture: arm64
+      default_ocpus: 2
+      default_memory_gb: 12
+      default_boot_volume_gb: 50
+      max_instances: 1
+      terraform_inputs:
+        shape: shape
+        ocpus: ocpus
+        memory_gb: memory_in_gbs
+        boot_volume_gb: boot_volume_size_in_gbs
+    constraint_profiles:
+      - always-free
     compatible:
       - application-storage
       - registry
@@ -37,6 +51,11 @@ capabilities:
   vault:
     path: oci/modules/vault
     kind: module
+
+constraint_profiles:
+  always-free:
+    provider: oci
+    path: policies/oci/always-free.yaml
 
 foundations:
   platform-bootstrap:
