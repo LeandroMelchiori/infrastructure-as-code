@@ -106,6 +106,37 @@ python tools/resolve_architecture.py \
 
 Los perfiles de restricciones viven en `policies/`. Un perfil válido limita recursos y genera inputs Terraform, pero no autoriza `terraform apply`; la elegibilidad de la cuenta, región, capacidad y el plan deben revisarse antes del despliegue.
 
+## Estimación de costo y presupuesto
+
+El resolver integra un motor de costos basado en un catálogo de precios revisado en `pricing/oci/current.yaml`. El modelo actual cubre A1 OCPU, memoria y boot volume (capacidad + performance).
+
+Ejemplo con presupuesto:
+
+```bash
+python tools/resolve_architecture.py \
+  --architecture oci-single-vm-multi-app \
+  --ocpus 1 \
+  --memory-gb 6 \
+  --max-monthly-usd 20 \
+  --json
+```
+
+Si el costo mensual modelado supera el presupuesto, la resolución falla antes de llegar a Terraform. Si queda dentro, devuelve el costo estimado, el margen restante y advertencias sobre servicios todavía no modelados.
+
+Para estimar sin resolver arquitectura:
+
+```bash
+python tools/estimate_cost.py \
+  --provider oci \
+  --shape VM.Standard.A1.Flex \
+  --ocpus 1 \
+  --memory-gb 6 \
+  --boot-volume-gb 50 \
+  --json
+```
+
+Las estimaciones usan precios de lista y no constituyen una factura garantizada. Always Free solo se aplica cuando se selecciona explícitamente el perfil correspondiente.
+
 ## Terraform State
 
 Cada arquitectura Terraform mantiene su propio state. `oci/docker-platform` usa
