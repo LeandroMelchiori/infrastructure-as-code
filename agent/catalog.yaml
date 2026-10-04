@@ -7,6 +7,8 @@ workflow:
   - extract_constraints
   - resolve_capabilities
   - resolve_constraint_profile
+  - estimate_cost
+  - validate_budget
   - validate_policy
   - request_missing_decisions
   - generate_plan
@@ -17,8 +19,10 @@ entrypoints:
   infrastructure_catalog: ../catalog.yaml
   rules: ./rules.md
   examples: ./examples.yaml
+  cost_model: ../docs/cost-estimation.md
 guidance:
   prefer_reference_architectures: true
   prefer_constraint_profiles_over_model_memory: true
+  prefer_pricing_catalog_over_model_memory: true
   never_scan_entire_repository_by_default: true
   never_apply_from_llm_reasoning_alone: true
