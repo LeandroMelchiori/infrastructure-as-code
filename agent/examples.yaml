@@ -32,6 +32,29 @@ examples:
       - deterministic_resolution
       - verify_account_entitlement
 
+  - request: "Use one OCI VM with 1 OCPU and 6 GB RAM and keep modeled cost under USD 20/month."
+    select:
+      architecture: oci-single-vm-multi-app
+      compute:
+        ocpus: 1
+        memory_gb: 6
+      budget:
+        max_monthly_usd: 20
+    require:
+      - cost_estimation
+      - budget_validation
+      - explain_unmodeled_costs
+
+  - request: "Keep this under USD 10/month."
+    select:
+      architecture: oci-single-vm-multi-app
+      budget:
+        max_monthly_usd: 10
+    require:
+      - resolve_current_sizing
+      - reject_if_modeled_cost_exceeds_budget
+      - suggest_explicit_free_profile_only_if_user_is_eligible
+
   - request: "I need the Docker platform plus private document storage."
     select:
       architecture: oci-single-vm-multi-app
