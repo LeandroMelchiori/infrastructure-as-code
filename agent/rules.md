@@ -12,15 +12,19 @@ Use metadata first. Do not scan the entire repository unless the selected archit
 - Do not let two Terraform states own the same resource.
 - Respect the documented Object Storage ownership model.
 - Treat public ingress, SSH exposure, IAM expansion and cost-bearing resources as review-sensitive changes.
+- Translate human constraints such as "Always Free", CPU, RAM and storage into resolver inputs; do not rely on the LLM's memory of provider limits.
+- Constraint profiles must include a source and review date. Re-check provider eligibility before apply when the profile requires it.
+- A valid constraint resolution is not a price quote and does not guarantee cloud capacity.
 
 ## Agent workflow
 
 1. Read `agent/catalog.yaml`.
 2. Read root `catalog.yaml`.
 3. Select one architecture.
-4. Resolve requested capabilities deterministically.
-5. Ask only for missing decisions that materially affect security, cost, availability or topology.
-6. Produce or modify Terraform.
-7. Run fmt/validate.
-8. Produce a plan.
-9. Stop for human review before apply.
+4. Extract explicit constraints: profile/budget, CPU, memory, storage and instance count.
+5. Resolve requested capabilities and constraints deterministically.
+6. Ask only for missing decisions that materially affect security, cost, availability or topology.
+7. Produce or modify Terraform.
+8. Run fmt/validate.
+9. Produce a plan.
+10. Stop for human review before apply.
