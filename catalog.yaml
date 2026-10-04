@@ -57,6 +57,12 @@ constraint_profiles:
     provider: oci
     path: policies/oci/always-free.yaml
 
+pricing_catalogs:
+  oci:
+    path: pricing/oci/current.yaml
+    currency: USD
+    mode: reviewed-static-list-price
+
 foundations:
   platform-bootstrap:
     path: oci/platform-bootstrap
