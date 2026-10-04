@@ -1,0 +1,26 @@
+version: 1
+examples:
+  - request: "Deploy several Docker apps cheaply on OCI."
+    select:
+      architecture: oci-single-vm-multi-app
+      capabilities: []
+    ask:
+      - environment
+      - region
+      - sizing
+
+  - request: "I need the Docker platform plus private document storage."
+    select:
+      architecture: oci-single-vm-multi-app
+      capabilities: [application-storage]
+    require:
+      - separate_state_ownership
+      - least_privilege_iam
+
+  - request: "Add observability and backups to the OCI Docker platform."
+    select:
+      architecture: oci-single-vm-multi-app
+      capabilities: [observability, backup]
+    require:
+      - terraform_plan
+      - human_review_before_apply
