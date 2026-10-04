@@ -12,9 +12,11 @@ Use metadata first. Do not scan the entire repository unless the selected archit
 - Do not let two Terraform states own the same resource.
 - Respect the documented Object Storage ownership model.
 - Treat public ingress, SSH exposure, IAM expansion and cost-bearing resources as review-sensitive changes.
-- Translate human constraints such as "Always Free", CPU, RAM and storage into resolver inputs; do not rely on the LLM's memory of provider limits.
-- Constraint profiles must include a source and review date. Re-check provider eligibility before apply when the profile requires it.
+- Translate human constraints such as "Always Free", CPU, RAM, storage and monthly budget into resolver inputs; do not rely on the LLM's memory of provider limits or prices.
+- Constraint profiles and pricing catalogs must include sources and review dates.
+- Re-check provider eligibility and pricing before apply when required.
 - A valid constraint resolution is not a price quote and does not guarantee cloud capacity.
+- Budget validation only guarantees the resources currently included in the cost model. Explain excluded services or usage before deployment.
 
 ## Agent workflow
 
@@ -23,8 +25,9 @@ Use metadata first. Do not scan the entire repository unless the selected archit
 3. Select one architecture.
 4. Extract explicit constraints: profile/budget, CPU, memory, storage and instance count.
 5. Resolve requested capabilities and constraints deterministically.
-6. Ask only for missing decisions that materially affect security, cost, availability or topology.
-7. Produce or modify Terraform.
-8. Run fmt/validate.
-9. Produce a plan.
-10. Stop for human review before apply.
+6. Estimate modeled monthly cost and validate any explicit budget.
+7. Ask only for missing decisions that materially affect security, cost, availability or topology.
+8. Produce or modify Terraform.
+9. Run fmt/validate.
+10. Produce a plan.
+11. Stop for human review before apply.
