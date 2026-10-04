@@ -4,7 +4,9 @@ workflow:
   - inspect_request
   - select_provider
   - select_reference_architecture
+  - extract_constraints
   - resolve_capabilities
+  - resolve_constraint_profile
   - validate_policy
   - request_missing_decisions
   - generate_plan
@@ -17,5 +19,6 @@ entrypoints:
   examples: ./examples.yaml
 guidance:
   prefer_reference_architectures: true
+  prefer_constraint_profiles_over_model_memory: true
   never_scan_entire_repository_by_default: true
   never_apply_from_llm_reasoning_alone: true
