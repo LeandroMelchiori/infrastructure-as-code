@@ -1,0 +1,48 @@
+version: 1
+provider: oci
+currency: USD
+region_scope: global-list-price
+hours_per_month: 730
+last_reviewed: 2026-10-04
+
+sources:
+  compute:
+    - https://www.oracle.com/latam/cloud/compute/cost-estimator/
+    - https://www.oracle.com/cloud/price-list/
+  block_volume:
+    - https://www.oracle.com/latam/a/ocom/docs/corporate/pricing/oracle-paas-and-iaas-global-price-list.pdf
+
+compute:
+  shapes:
+    VM.Standard.A1.Flex:
+      ocpu_hour_usd: 0.01
+      memory_gb_hour_usd: 0.0015
+      notes:
+        - Pricing is resource-based; OCPU and memory are billed separately.
+        - Free allowances are not applied unless a constraint profile is explicitly selected.
+
+block_volume:
+  storage_gb_month_usd: 0.0255
+  vpu_gb_month_usd: 0.0017
+  default_boot_vpus_per_gb: 10
+  notes:
+    - Boot volumes support Balanced performance at 10 VPU/GB.
+    - Always Free storage allowances are applied only through an explicit constraint profile.
+
+model_scope:
+  included:
+    - compute_ocpu
+    - compute_memory
+    - boot_volume_capacity
+    - boot_volume_performance
+  excluded:
+    - network_egress
+    - object_storage
+    - backups
+    - load_balancer
+    - logging
+    - notifications
+    - vault
+    - registry_storage
+    - taxes
+    - negotiated_discounts
