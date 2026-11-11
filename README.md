@@ -21,6 +21,7 @@ Cada carpeta representa una infraestructura independiente y contiene su propia d
 | OCI | [Platform Bootstrap](./oci/platform-bootstrap/) | Compartment de plataforma y bucket privado para Terraform State | Desplegada en dev |
 | OCI | [Terraform State](./oci/terraform-state/) | Bucket privado y versionado para backends remotos de Terraform | Disponible |
 | OCI | [Application Storage](./oci/application-storage/) | Bucket privado y policy IAM minima para documentos de aplicaciones | Preparada |
+| OCI | [Application Backups](./oci/application-backups/) | Bucket privado con retencion automatica para backups de bases de datos de aplicaciones | Preparada |
 | OCI | [Docker Platform](./oci/docker-platform/) | Plataforma Docker reutilizable con networking, IAM, Vault, Traefik y bootstrap automatizado | Desplegada en dev |
 | OCI | Kubernetes Platform | Plataforma basada en Kubernetes | Próximamente |
 | AWS | Container Platform | Arquitectura de contenedores en AWS | Próximamente |
@@ -68,6 +69,10 @@ infrastructure-as-code/
 │   │   └── terraform.tfvars.example
 │   │
 │   ├── application-storage/
+│   │   ├── README.md
+│   │   └── *.tf
+│   │
+│   ├── application-backups/
 │   │   ├── README.md
 │   │   └── *.tf
 │   │
@@ -166,6 +171,7 @@ Cada bucket tiene un único root module propietario y un único state:
 | Terraform State dentro de un compartment existente | `oci/terraform-state` | Local y protegido fuera de Git |
 | Archivos genéricos de la plataforma Docker | `oci/docker-platform` | Backend remoto independiente por entorno |
 | Documentos de una aplicación | `oci/application-storage` | Backend remoto propio |
+| Backups de la base de una aplicación | `oci/application-backups` | Backend remoto propio por aplicación |
 
 `oci/platform-bootstrap` y `oci/terraform-state` son alternativas para el
 bootstrap del state; nunca deben administrar el mismo bucket. Un bucket creado

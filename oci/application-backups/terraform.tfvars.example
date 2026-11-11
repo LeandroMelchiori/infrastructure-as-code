@@ -1,0 +1,24 @@
+# Identidad OCI. Reemplaza los placeholders en una copia local terraform.tfvars.
+tenancy_ocid     = "ocid1.tenancy.oc1..REEMPLAZAR"
+compartment_ocid = "ocid1.compartment.oc1..REEMPLAZAR"
+compartment_name = "REEMPLAZAR_COMPARTMENT"
+project_name     = "example-app"
+
+region                  = "sa-saopaulo-1"
+oci_auth                = "SecurityToken"
+oci_config_file_profile = "TERRAFORM"
+
+# Bucket privado para los backups de la base de datos de la aplicacion.
+bucket_name = "REEMPLAZAR_BUCKET_UNICO"
+
+# Dynamic group preexistente de la instancia que sube los backups. En oci/docker-platform es
+# <project_name>-server-dg. Terraform no crea ni modifica el dynamic group.
+dynamic_group_name = "example-platform-server-dg"
+
+# Cada backup se borra solo despues de estos dias.
+retention_days = 30
+
+# Permite descargar backups desde la instancia para probar restauraciones.
+allow_read = true
+
+freeform_tags = {}
