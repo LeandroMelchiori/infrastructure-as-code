@@ -10,6 +10,7 @@ Las infraestructuras actualmente implementadas son:
 
 - `oci/platform-bootstrap`: bootstrap independiente para crear el compartment de plataforma y su bucket privado de Terraform State.
 - `oci/terraform-state`: bootstrap independiente para un bucket privado y versionado dedicado al estado remoto de Terraform.
+- `oci/application-backups`: bucket privado con retención por ciclo de vida para backups de la base de una aplicación, con acceso mínimo para el dynamic group de la instancia que los genera.
 - `oci/docker-platform`: plataforma Docker sobre Oracle Cloud Infrastructure con networking, Compute, Docker/Compose, Traefik, Vault/KMS, Object Storage, Monitoring/Notifications, backups, Logging, OCIR y base restringida para CI/CD de aplicaciones.
 - `oci/reference-architectures`: guías de composición reutilizables que enlazan root modules canónicos sin duplicar sus archivos Terraform.
 

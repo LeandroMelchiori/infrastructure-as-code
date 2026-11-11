@@ -1,0 +1,15 @@
+# Copia como backend.oci.tfbackend y completa valores no versionados.
+# Este bucket es el dedicado a Terraform State, no el bucket de backups.
+# Usa una clave distinta por aplicacion: cada una tiene su propio state.
+
+bucket    = "REEMPLAZAR_BUCKET_TERRAFORM_STATE"
+namespace = "REEMPLAZAR_NAMESPACE"
+key       = "application-backups/REEMPLAZAR_APLICACION/terraform.tfstate"
+region    = "sa-saopaulo-1"
+
+# Runner OCI con Instance Principal:
+# auth = "InstancePrincipal"
+
+# OCI Cloud Shell o sesion local autenticada:
+# auth                = "SecurityToken"
+# config_file_profile = "TERRAFORM"
